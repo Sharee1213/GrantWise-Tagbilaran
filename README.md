@@ -1,2 +1,2 @@
 # GrantWise-Tagbilaran
-GrantWise Tagbilaran - Multi-Unit LGU Scholarship &amp; Educational Grant Disbursement Engine
+GrantWise – Tagbilaran City Scholarship and Educational Grant Management Platform
