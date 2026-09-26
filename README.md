@@ -1,2 +1,3 @@
 # GrantWise-Tagbilaran
-GrantWise – Tagbilaran City Scholarship and Educational Grant Management Platform
+GrantWise Tagbilaran – Barangay-Linked College Scholarship Grant Disbursement System
+
