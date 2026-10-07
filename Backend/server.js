@@ -3,6 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const pool = require("./db");
+const { initDatabase } = require("./init-database");
 
 const app = express();
 
@@ -27,6 +28,21 @@ app.get("/api/test-db", async (req, res) => {
         console.error(error);
         res.status(500).json({
             message: "Database connection failed"
+        });
+    }
+});
+
+app.post("/api/init-db", async (req, res) => {
+    try {
+        await initDatabase();
+        res.json({
+            message: "GrantWise database schema initialized successfully."
+        });
+    } catch (error) {
+        console.error("Schema initialization failed:", error);
+        res.status(500).json({
+            message: "Schema initialization failed",
+            detail: error.message
         });
     }
 });
