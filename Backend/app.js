@@ -128,6 +128,21 @@ function createApp({
         }
     });
 
+    // ADDED: dropdown data for the sign-up form (barangays and approved schools)
+    app.get("/api/lookups", async (req, res, next) => {
+        try {
+            const barangays = await pool.query(
+                'SELECT barangay_id, barangay_name FROM "Barangays" ORDER BY barangay_name'
+            );
+            const schools = await pool.query(
+                'SELECT school_id, school_name FROM "Schools" WHERE is_approved = TRUE ORDER BY school_name'
+            );
+            res.json({ barangays: barangays.rows, schools: schools.rows });
+        } catch (error) {
+            next(error);
+        }
+    });
+
     if (allowDevelopmentRoutes) {
         app.post("/api/init-db", async (req, res) => {
             try {
