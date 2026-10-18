@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon server.js",
+    "test": "node --test",
+    "dev": "node --watch -r ./dev-env.js server.js",
     "start": "node server.js",
     "init-db": "node init-database.js"
   },
@@ -14,12 +14,17 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "argon2": "^0.41.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
     "pg": "^8.23.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "supertest": "^7.0.0",
+    "zod": "^3.24.1"
   }
 }
