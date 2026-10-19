@@ -38,13 +38,18 @@ CREATE TABLE IF NOT EXISTS "Users" (
     barangay_id INTEGER REFERENCES "Barangays"(barangay_id),
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
+    email VARCHAR(255) NOT NULL UNIQUE
+        CONSTRAINT chk_users_email_normalized
+        CHECK (email = LOWER(BTRIM(email)) AND POSITION(' ' IN email) = 0),
     password_hash TEXT NOT NULL,
     phone_number VARCHAR(30),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_lower_email
+    ON "Users" (LOWER(BTRIM(email)));
 
 CREATE TABLE IF NOT EXISTS "Login_Sessions" (
     session_id SERIAL PRIMARY KEY,

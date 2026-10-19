@@ -14,6 +14,301 @@ const SESSION_DURATION_MS = 12 * 60 * 60 * 1000;
 const SESSION_DURATION_SECONDS = SESSION_DURATION_MS / 1000;
 const MAX_QUEUE_SIZE = 50;
 
+const ROLE_PORTAL_PATHS = Object.freeze({
+    Scholar: "/portal/student",
+    "LGU Admin": "/portal/lgu-admin",
+    "Barangay Coordinator": "/portal/barangay-coordinator",
+    Registrar: "/portal/school-registrar"
+});
+
+const ROLE_SCOPE_TYPES = Object.freeze({
+    Scholar: "student",
+    "LGU Admin": "funding_unit",
+    "Barangay Coordinator": "barangay",
+    Registrar: "school"
+});
+
+const PERSONAL_GMAIL_DOMAINS = new Set(["gmail.com"]);
+const PERSONAL_CONSUMER_DOMAINS = new Set([
+    "gmail.com",
+    "googlemail.com",
+    "yahoo.com",
+    "yahoo.com.ph",
+    "ymail.com",
+    "rocketmail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "aol.com",
+    "proton.me",
+    "protonmail.com",
+    "zoho.com",
+    "mail.com",
+    "gmx.com"
+]);
+
+function normalizeEmail(value) {
+    return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function parseEmailAddress(value) {
+    const normalized = normalizeEmail(value);
+    if (!normalized || normalized.length > 255) return null;
+    if (/\s/.test(normalized) || /[<>",;\\]/.test(normalized)) return null;
+
+    const parts = normalized.split("@");
+    if (parts.length !== 2) return null;
+    const [localPart, domain] = parts;
+    if (!localPart || !domain || localPart.length > 64 || domain.length > 253) {
+        return null;
+    }
+    if (
+        localPart.startsWith(".") ||
+        localPart.endsWith(".") ||
+        localPart.includes("..") ||
+        !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(localPart)
+    ) {
+        return null;
+    }
+
+    const domainLabels = domain.split(".");
+    if (domainLabels.length < 2) return null;
+    const validLabels = domainLabels.every(
+        (label) =>
+            label.length >= 1 &&
+            label.length <= 63 &&
+            /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)
+    );
+    const tld = domainLabels[domainLabels.length - 1];
+    if (!validLabels || !/^[a-z]{2,63}$/.test(tld)) {
+        return null;
+    }
+
+    return {
+        normalized,
+        localPart,
+        domain
+    };
+}
+
+function parseConfiguredDomainSet(raw) {
+    if (!raw || typeof raw !== "string") return new Set();
+    return new Set(
+        raw
+            .split(",")
+            .map((entry) => entry.trim().toLowerCase().replace(/^@+/, ""))
+            .filter(Boolean)
+    );
+}
+
+function matchesDomainSet(domain, domainSet) {
+    for (const configured of domainSet) {
+        if (domain === configured || domain.endsWith(`.${configured}`)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function getEmailPolicyConfig(env = process.env) {
+    const schoolDomains = parseConfiguredDomainSet(
+        env.ALLOWED_SCHOOL_EMAIL_DOMAINS || env.SCHOOL_EMAIL_DOMAINS
+    );
+    const lguDomains = parseConfiguredDomainSet(
+        env.ALLOWED_LGU_EMAIL_DOMAINS || env.LGU_EMAIL_DOMAINS
+    );
+    const barangayDomains = parseConfiguredDomainSet(
+        env.ALLOWED_BARANGAY_EMAIL_DOMAINS || env.BARANGAY_EMAIL_DOMAINS
+    );
+    const strictSchoolDomainAllowlist =
+        env.STRICT_SCHOOL_DOMAIN_ALLOWLIST === "true";
+    const emailVerificationEnabled = Boolean(
+        env.EMAIL_VERIFICATION_ENABLED === "true" &&
+        env.SMTP_HOST &&
+        env.SMTP_FROM
+    );
+
+    return {
+        schoolDomains,
+        lguDomains,
+        barangayDomains,
+        strictSchoolDomainAllowlist,
+        emailVerificationEnabled
+    };
+}
+
+function isOfficialSchoolEmailDomain(domain, policyConfig, schoolDomainFromDb = null) {
+    if (
+        PERSONAL_CONSUMER_DOMAINS.has(domain) ||
+        matchesDomainSet(domain, policyConfig.lguDomains) ||
+        matchesDomainSet(domain, policyConfig.barangayDomains) ||
+        domain.endsWith(".gov.ph") ||
+        domain.endsWith(".gov")
+    ) {
+        return false;
+    }
+
+    if (schoolDomainFromDb) {
+        const normalizedSchoolDomain = schoolDomainFromDb
+            .trim()
+            .toLowerCase()
+            .replace(/^@+/, "");
+        if (normalizedSchoolDomain) {
+            return (
+                domain === normalizedSchoolDomain ||
+                domain.endsWith(`.${normalizedSchoolDomain}`)
+            );
+        }
+    }
+
+    if (policyConfig.schoolDomains.size > 0) {
+        if (matchesDomainSet(domain, policyConfig.schoolDomains)) {
+            return true;
+        }
+        if (policyConfig.strictSchoolDomainAllowlist) {
+            return false;
+        }
+    }
+
+    return (
+        (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
+        (domain.endsWith(".edu") && domain.length > ".edu".length)
+    );
+}
+
+function isOfficialLguEmailDomain(domain, policyConfig) {
+    if (
+        PERSONAL_GMAIL_DOMAINS.has(domain) ||
+        PERSONAL_CONSUMER_DOMAINS.has(domain) ||
+        matchesDomainSet(domain, policyConfig.schoolDomains) ||
+        domain.endsWith(".edu.ph") ||
+        domain.endsWith(".edu")
+    ) {
+        return false;
+    }
+
+    if (policyConfig.lguDomains.size > 0) {
+        return matchesDomainSet(domain, policyConfig.lguDomains);
+    }
+
+    return true;
+}
+
+function isOfficialBarangayOrLguEmailDomain(domain, policyConfig) {
+    if (
+        PERSONAL_CONSUMER_DOMAINS.has(domain) ||
+        matchesDomainSet(domain, policyConfig.schoolDomains) ||
+        domain.endsWith(".edu.ph") ||
+        domain.endsWith(".edu")
+    ) {
+        return false;
+    }
+
+    if (policyConfig.barangayDomains.size > 0 || policyConfig.lguDomains.size > 0) {
+        return (
+            matchesDomainSet(domain, policyConfig.barangayDomains) ||
+            matchesDomainSet(domain, policyConfig.lguDomains)
+        );
+    }
+
+    return true;
+}
+
+function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig(), options = {}) {
+    const parsed = parseEmailAddress(email);
+    if (!parsed) {
+        return {
+            valid: false,
+            message: "Enter a valid email address."
+        };
+    }
+
+    const { domain, normalized } = parsed;
+
+    if (role === "Scholar") {
+        if (
+            PERSONAL_GMAIL_DOMAINS.has(domain) ||
+            isOfficialSchoolEmailDomain(domain, policyConfig, options.schoolDomain)
+        ) {
+            return { valid: true, normalizedEmail: normalized, domain };
+        }
+        return {
+            valid: false,
+            message:
+                "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address."
+        };
+    }
+
+    if (role === "LGU Admin") {
+        if (
+            PERSONAL_GMAIL_DOMAINS.has(domain) ||
+            PERSONAL_CONSUMER_DOMAINS.has(domain) ||
+            matchesDomainSet(domain, policyConfig.schoolDomains) ||
+            domain.endsWith(".edu.ph") ||
+            domain.endsWith(".edu")
+        ) {
+            return {
+                valid: false,
+                message:
+                    "LGU Program Admin accounts must use an official LGU-issued email address. Personal Gmail, consumer, and school email addresses are not permitted."
+            };
+        }
+        if (options.requireConfiguredLguDomain && policyConfig.lguDomains.size === 0) {
+            return {
+                valid: false,
+                code: "LGU_DOMAIN_CONFIG_REQUIRED",
+                message:
+                    "Official LGU email domain configuration (ALLOWED_LGU_EMAIL_DOMAINS) must be confirmed with the LGU and configured before provisioning LGU Program Admin accounts."
+            };
+        }
+        if (!isOfficialLguEmailDomain(domain, policyConfig)) {
+            return {
+                valid: false,
+                message:
+                    "LGU Program Admin accounts must use an approved official LGU-issued email address."
+            };
+        }
+        return { valid: true, normalizedEmail: normalized, domain };
+    }
+
+    if (role === "Barangay Coordinator") {
+        if (
+            PERSONAL_GMAIL_DOMAINS.has(domain) ||
+            isOfficialBarangayOrLguEmailDomain(domain, policyConfig)
+        ) {
+            return { valid: true, normalizedEmail: normalized, domain };
+        }
+        return {
+            valid: false,
+            message:
+                "Barangay Coordinators must use a personal Gmail address (@gmail.com) or an official barangay/LGU email address."
+        };
+    }
+
+    if (role === "Registrar") {
+        if (
+            PERSONAL_GMAIL_DOMAINS.has(domain) ||
+            isOfficialSchoolEmailDomain(domain, policyConfig, options.schoolDomain)
+        ) {
+            return { valid: true, normalizedEmail: normalized, domain };
+        }
+        return {
+            valid: false,
+            message:
+                "School Registrars must use a personal Gmail address (@gmail.com) or an official school email address."
+        };
+    }
+
+    return {
+        valid: false,
+        message: "This account does not have a supported role assignment."
+    };
+}
+
 const registrationSchema = z.object({
     firstName: z.string({ required_error: "First name is required." })
         .trim()
@@ -26,9 +321,11 @@ const registrationSchema = z.object({
     email: z.string({ required_error: "Email address is required." })
         .trim()
         .min(1, "Email address is required.")
-        .email("Enter a valid email address.")
         .max(255, "Email address must be 255 characters or fewer.")
-        .transform((value) => value.toLowerCase()),
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
     password: z.string({ required_error: "Password is required." })
         .min(12, "Password must be at least 12 characters long.")
         .max(128, "Password must be 128 characters or fewer.")
@@ -66,15 +363,60 @@ const loginSchema = z.object({
     email: z.string({ required_error: "Email address is required." })
         .trim()
         .min(1, "Email address is required.")
-        .email("Enter a valid email address.")
         .max(255, "Email address must be 255 characters or fewer.")
-        .transform((value) => value.toLowerCase()),
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
     password: z.string({ required_error: "Password is required." })
         .min(1, "Password is required.")
         .max(128, "Password must be 128 characters or fewer.")
         .refine((value) => value.trim().length > 0, {
             message: "Password cannot contain only whitespace."
         })
+}).strict();
+
+const staffProvisionSchema = z.object({
+    role: z.enum(["LGU Admin", "Barangay Coordinator", "Registrar"], {
+        required_error: "Select an authorized staff role."
+    }),
+    firstName: z.string({ required_error: "First name is required." })
+        .trim()
+        .min(1, "First name is required.")
+        .max(100, "First name must be 100 characters or fewer."),
+    lastName: z.string({ required_error: "Last name is required." })
+        .trim()
+        .min(1, "Last name is required.")
+        .max(100, "Last name must be 100 characters or fewer."),
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
+    password: z.string({ required_error: "Password is required." })
+        .min(12, "Password must be at least 12 characters long.")
+        .max(128, "Password must be 128 characters or fewer.")
+        .refine((value) => value.trim().length > 0, {
+            message: "Password cannot contain only whitespace."
+        }),
+    phoneNumber: z.string()
+        .trim()
+        .max(30, "Phone number must be 30 characters or fewer.")
+        .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+        .optional()
+        .nullable(),
+    positionTitle: z.string()
+        .trim()
+        .min(1)
+        .max(100)
+        .optional()
+        .nullable(),
+    fundingUnitId: z.number().int().positive().optional(),
+    barangayId: z.number().int().positive().optional(),
+    schoolId: z.number().int().positive().optional()
 }).strict();
 
 const applicationSchema = z.object({
@@ -307,6 +649,7 @@ function createApp({
 } = {}) {
     const app = express();
     const allowedOrigins = getAllowedOrigins(env);
+    const emailPolicyConfig = getEmailPolicyConfig(env);
     const secureCookies = env.NODE_ENV === "production";
     const allowDevelopmentRoutes = env.NODE_ENV === "development";
     const allowRegistration =
@@ -455,6 +798,21 @@ function createApp({
             }
 
             const data = input.data;
+            const studentEmailPolicy = validateEmailForRole(
+                data.email,
+                "Scholar",
+                emailPolicyConfig
+            );
+            if (!studentEmailPolicy.valid) {
+                return res.status(400).json({
+                    message: "Registration details are invalid.",
+                    errors: [{
+                        field: "email",
+                        message: studentEmailPolicy.message
+                    }]
+                });
+            }
+
             const passwordHash = await argon2.hash(data.password, {
                 type: argon2.argon2id,
                 memoryCost: 19456,
@@ -527,6 +885,27 @@ function createApp({
                     });
                 }
 
+                const schoolEmailDomain = approvedSchool.rows[0]?.email_domain || null;
+                if (schoolEmailDomain) {
+                    const schoolSpecificEmailCheck = validateEmailForRole(
+                        data.email,
+                        "Scholar",
+                        emailPolicyConfig,
+                        { schoolDomain: schoolEmailDomain }
+                    );
+                    if (!schoolSpecificEmailCheck.valid) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Registration details are invalid.",
+                            errors: [{
+                                field: "email",
+                                message: schoolSpecificEmailCheck.message
+                            }]
+                        });
+                    }
+                }
+
+                // Public self-registration only ever creates Scholar accounts.
                 const role = await client.query(
                     'SELECT role_id FROM "Roles" WHERE role_name = $1',
                     ["Scholar"]
@@ -566,7 +945,12 @@ function createApp({
                 );
                 await client.query("COMMIT");
                 return res.status(201).json({
-                    message: "Account created. Sign in to continue."
+                    message: "Account created. Sign in to continue.",
+                    emailVerification: {
+                        enabled: emailPolicyConfig.emailVerificationEnabled,
+                        verified: false,
+                        verificationEmailSent: false
+                    }
                 });
             } catch (error) {
                 try {
@@ -631,6 +1015,40 @@ function createApp({
             return res.status(401).json({ message: "Email or password is invalid." });
         }
 
+        if (!ROLE_PORTAL_PATHS[user.role_name]) {
+            return res.status(403).json({
+                message: "This account does not have an active role assignment."
+            });
+        }
+
+        const roleEmailCheck = validateEmailForRole(
+            user.email,
+            user.role_name,
+            emailPolicyConfig
+        );
+        if (!roleEmailCheck.valid) {
+            return res.status(403).json({
+                message: roleEmailCheck.message
+            });
+        }
+
+        let resolvedScopeId = null;
+        if (user.role_name === "Scholar" && user.student_id !== undefined) {
+            resolvedScopeId = user.student_id;
+        } else if (user.role_name === "LGU Admin" && user.funding_unit_id !== undefined) {
+            resolvedScopeId = user.funding_unit_id;
+        } else if (
+            user.role_name === "Barangay Coordinator" &&
+            user.coordinator_barangay_id !== undefined
+        ) {
+            resolvedScopeId = user.coordinator_barangay_id;
+        } else if (
+            user.role_name === "Registrar" &&
+            user.registrar_school_id !== undefined
+        ) {
+            resolvedScopeId = user.registrar_school_id;
+        }
+
         const token = crypto.randomBytes(32).toString("base64url");
         await pool.query(
             `INSERT INTO "Login_Sessions" (user_id, token_hash, expires_at)
@@ -643,8 +1061,15 @@ function createApp({
                 userId: user.user_id,
                 firstName: user.first_name,
                 lastName: user.last_name,
-                email: user.email,
-                role: user.role_name
+                email: normalizeEmail(user.email),
+                role: user.role_name,
+                scopeId: resolvedScopeId,
+                scopeType: ROLE_SCOPE_TYPES[user.role_name] || null,
+                dashboardPath: ROLE_PORTAL_PATHS[user.role_name]
+            },
+            emailVerification: {
+                enabled: emailPolicyConfig.emailVerificationEnabled,
+                verified: false
             }
         });
     });
@@ -717,13 +1142,26 @@ function createApp({
                 });
             }
 
+            const roleEmailCheck = validateEmailForRole(
+                row.email,
+                row.role_name,
+                emailPolicyConfig
+            );
+            if (!roleEmailCheck.valid) {
+                return res.status(403).json({
+                    message: roleEmailCheck.message
+                });
+            }
+
             req.auth = {
                 userId: row.user_id,
                 firstName: row.first_name,
                 lastName: row.last_name,
-                email: row.email,
+                email: normalizeEmail(row.email),
                 role: row.role_name,
-                scopeId
+                scopeId,
+                scopeType: ROLE_SCOPE_TYPES[row.role_name] || null,
+                dashboardPath: ROLE_PORTAL_PATHS[row.role_name] || "/portals"
             };
             return next();
         } catch (error) {
@@ -1304,6 +1742,251 @@ function createApp({
         }
     );
 
+    app.post(
+        "/api/admin/staff-accounts",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res, next) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const input = staffProvisionSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Staff account details are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+
+            const data = input.data;
+            const emailPolicyCheck = validateEmailForRole(
+                data.email,
+                data.role,
+                emailPolicyConfig,
+                { requireConfiguredLguDomain: data.role === "LGU Admin" }
+            );
+            if (!emailPolicyCheck.valid) {
+                const status =
+                    emailPolicyCheck.code === "LGU_DOMAIN_CONFIG_REQUIRED" ? 503 : 400;
+                return res.status(status).json({
+                    message: emailPolicyCheck.message,
+                    errors: [{
+                        field: "email",
+                        message: emailPolicyCheck.message
+                    }]
+                });
+            }
+
+            if (data.role === "LGU Admin") {
+                if (
+                    data.fundingUnitId !== undefined &&
+                    data.fundingUnitId !== req.auth.scopeId
+                ) {
+                    return res.status(403).json({
+                        message: "LGU administrators may only provision accounts within their assigned funding unit."
+                    });
+                }
+            } else if (data.role === "Barangay Coordinator") {
+                if (!data.barangayId) {
+                    return res.status(400).json({
+                        message: "Select the assigned barangay for the Barangay Coordinator.",
+                        errors: [{
+                            field: "barangayId",
+                            message: "Select a valid barangay."
+                        }]
+                    });
+                }
+            } else if (data.role === "Registrar") {
+                if (!data.schoolId) {
+                    return res.status(400).json({
+                        message: "Select the assigned partner school for the Registrar.",
+                        errors: [{
+                            field: "schoolId",
+                            message: "Select an approved school."
+                        }]
+                    });
+                }
+            }
+
+            const passwordHash = await argon2.hash(data.password, {
+                type: argon2.argon2id,
+                memoryCost: 19456,
+                timeCost: 2,
+                parallelism: 1
+            });
+            const client = await pool.connect();
+
+            try {
+                await client.query("BEGIN");
+                await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+                    data.email
+                ]);
+
+                const existingUser = await client.query(
+                    'SELECT 1 FROM "Users" WHERE lower(email) = $1 LIMIT 1',
+                    [data.email]
+                );
+                if (existingUser.rowCount > 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(409).json({
+                        message: "An account with this email address already exists.",
+                        errors: [{
+                            field: "email",
+                            message: "An account with this email address already exists."
+                        }]
+                    });
+                }
+
+                let targetScopeId = req.auth.scopeId;
+                let userBarangayId = null;
+
+                if (data.role === "Barangay Coordinator") {
+                    const barangay = await client.query(
+                        'SELECT 1 FROM "Barangays" WHERE barangay_id = $1',
+                        [data.barangayId]
+                    );
+                    if (barangay.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Select a valid barangay.",
+                            errors: [{
+                                field: "barangayId",
+                                message: "Select a valid barangay."
+                            }]
+                        });
+                    }
+                    targetScopeId = data.barangayId;
+                    userBarangayId = data.barangayId;
+                } else if (data.role === "Registrar") {
+                    const school = await client.query(
+                        'SELECT 1 FROM "Schools" WHERE school_id = $1 AND is_approved = TRUE',
+                        [data.schoolId]
+                    );
+                    if (school.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Select an approved school.",
+                            errors: [{
+                                field: "schoolId",
+                                message: "Select an approved school."
+                            }]
+                        });
+                    }
+                    targetScopeId = data.schoolId;
+                }
+
+                const roleRow = await client.query(
+                    'SELECT role_id FROM "Roles" WHERE role_name = $1',
+                    [data.role]
+                );
+                if (roleRow.rowCount !== 1) {
+                    throw new Error(`The ${data.role} role is not configured.`);
+                }
+
+                const createdUser = await client.query(
+                    `INSERT INTO "Users" (
+                        role_id, barangay_id, first_name, last_name, email,
+                        password_hash, phone_number
+                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     RETURNING user_id`,
+                    [
+                        roleRow.rows[0].role_id,
+                        userBarangayId,
+                        data.firstName,
+                        data.lastName,
+                        data.email,
+                        passwordHash,
+                        data.phoneNumber || null
+                    ]
+                );
+                const newUserId = createdUser.rows[0].user_id;
+
+                if (data.role === "LGU Admin") {
+                    await client.query(
+                        `INSERT INTO "LGU_Admins" (
+                            user_id, funding_unit_id, position_title, is_active
+                         ) VALUES ($1, $2, $3, TRUE)`,
+                        [
+                            newUserId,
+                            targetScopeId,
+                            data.positionTitle || "Scholarship Program Officer"
+                        ]
+                    );
+                } else if (data.role === "Barangay Coordinator") {
+                    await client.query(
+                        `INSERT INTO "Barangay_Coordinators" (
+                            user_id, barangay_id, position_title, term_start, is_current
+                         ) VALUES ($1, $2, $3, CURRENT_DATE, TRUE)`,
+                        [
+                            newUserId,
+                            targetScopeId,
+                            data.positionTitle || "Barangay Scholarship Coordinator"
+                        ]
+                    );
+                } else if (data.role === "Registrar") {
+                    await client.query(
+                        `INSERT INTO "Registrars" (
+                            user_id, school_id, position_title, is_active
+                         ) VALUES ($1, $2, $3, TRUE)`,
+                        [
+                            newUserId,
+                            targetScopeId,
+                            data.positionTitle || "School Registrar"
+                        ]
+                    );
+                }
+
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'staff_account_provisioned', 'Users', $2,
+                               jsonb_build_object(
+                                   'provisioned_role', $3,
+                                   'scope_id', $4
+                               ))`,
+                    [req.auth.userId, newUserId, data.role, targetScopeId]
+                );
+
+                await client.query("COMMIT");
+                return res.status(201).json({
+                    message: "Staff account provisioned.",
+                    staffAccount: {
+                        userId: newUserId,
+                        firstName: data.firstName,
+                        lastName: data.lastName,
+                        email: data.email,
+                        role: data.role,
+                        scopeId: targetScopeId,
+                        scopeType: ROLE_SCOPE_TYPES[data.role],
+                        dashboardPath: ROLE_PORTAL_PATHS[data.role]
+                    },
+                    emailVerification: {
+                        enabled: emailPolicyConfig.emailVerificationEnabled,
+                        verified: false,
+                        verificationEmailSent: false
+                    }
+                });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Staff provisioning rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (error.code === "23505") {
+                    return res.status(409).json({
+                        message: "An account or active role assignment already exists for this staff member."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
     app.post("/api/auth/logout", requireAuthentication, async (req, res) => {
         await pool.query(
             `UPDATE "Login_Sessions"
@@ -1322,7 +2005,14 @@ function createApp({
                 firstName: req.auth.firstName,
                 lastName: req.auth.lastName,
                 email: req.auth.email,
-                role: req.auth.role
+                role: req.auth.role,
+                scopeId: req.auth.scopeId,
+                scopeType: req.auth.scopeType,
+                dashboardPath: req.auth.dashboardPath
+            },
+            emailVerification: {
+                enabled: emailPolicyConfig.emailVerificationEnabled,
+                verified: false
             }
         });
     });
@@ -2119,5 +2809,10 @@ function createApp({
 
 module.exports = {
     createApp,
-    SESSION_COOKIE
+    SESSION_COOKIE,
+    ROLE_PORTAL_PATHS,
+    ROLE_SCOPE_TYPES,
+    normalizeEmail,
+    getEmailPolicyConfig,
+    validateEmailForRole
 };

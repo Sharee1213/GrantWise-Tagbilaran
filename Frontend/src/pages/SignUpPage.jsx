@@ -15,6 +15,49 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PHONE_PATTERN = /^[0-9+()\-\s]{7,30}$/;
 const NAME_PATTERN = /^[\p{L}\p{M}\s.'-]+$/u;
 
+const DISALLOWED_STUDENT_CONSUMER_DOMAINS = new Set([
+  "googlemail.com",
+  "yahoo.com",
+  "yahoo.com.ph",
+  "ymail.com",
+  "rocketmail.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "msn.com",
+  "icloud.com",
+  "me.com",
+  "mac.com",
+  "aol.com",
+  "proton.me",
+  "protonmail.com",
+  "zoho.com",
+  "mail.com",
+  "gmx.com",
+]);
+
+export function isAllowedStudentEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!EMAIL_PATTERN.test(normalized) || /[<>",;\\]/.test(normalized)) {
+    return false;
+  }
+  const parts = normalized.split("@");
+  if (parts.length !== 2) return false;
+  const [, domain] = parts;
+  if (domain === "gmail.com") return true;
+  if (
+    DISALLOWED_STUDENT_CONSUMER_DOMAINS.has(domain) ||
+    domain.endsWith(".gov.ph") ||
+    domain.endsWith(".gov")
+  ) {
+    return false;
+  }
+  return (
+    (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
+    (domain.endsWith(".edu") && domain.length > ".edu".length)
+  );
+}
+
 const YEAR_LEVEL_OPTIONS = [
   "1st Year",
   "2nd Year",
@@ -27,7 +70,7 @@ function validateRegistrationForm(form) {
   const errors = {};
   const firstName = form.firstName.trim();
   const lastName = form.lastName.trim();
-  const email = form.email.trim();
+  const email = form.email.trim().toLowerCase();
   const phoneNumber = form.phoneNumber.trim();
   const studentNumber = form.studentNumber.trim();
   const course = form.course.trim();
@@ -53,7 +96,10 @@ function validateRegistrationForm(form) {
   } else if (email.length > 255) {
     errors.email = "Email address must be 255 characters or fewer.";
   } else if (/\s/.test(email) || !EMAIL_PATTERN.test(email)) {
-    errors.email = "Enter a valid email address (for example, name@school.edu.ph).";
+    errors.email = "Enter a valid email address (for example, name@gmail.com or name@school.edu.ph).";
+  } else if (!isAllowedStudentEmail(email)) {
+    errors.email =
+      "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address.";
   }
 
   if (!form.password) {
@@ -272,9 +318,9 @@ export default function SignUpPage() {
   return (
     <div className="page-container information-page narrow-page">
       <PageHeading
-        eyebrow="ACCOUNT ACCESS"
+        eyebrow="STUDENT REGISTRATION"
         title="Create your student account."
-        description="Scholarship applicants register here with their Tagbilaran barangay and approved school details."
+        description="Scholarship applicants register here using a personal Gmail (@gmail.com) or school-issued email address. LGU Program Admin, Barangay Coordinator, and School Registrar accounts are provisioned only through authorized administration."
       />
 
       <div className="auth-card">
@@ -350,15 +396,19 @@ export default function SignUpPage() {
                 name="email"
                 type="email"
                 inputMode="email"
-                placeholder="student@school.edu.ph"
+                placeholder="name@gmail.com or student@school.edu.ph"
                 value={form.email}
                 onChange={handleChange}
                 onBlur={handleBlur}
                 autoComplete="email"
                 aria-invalid={Boolean(getFieldError("email"))}
+                aria-describedby="signup-email-hint"
                 disabled={loading}
                 required
               />
+              <p id="signup-email-hint" className="field-hint">
+                Personal Gmail (<code>@gmail.com</code>) or official school-issued email required.
+              </p>
               {getFieldError("email") && (
                 <p role="alert" className="field-error">
                   {getFieldError("email")}

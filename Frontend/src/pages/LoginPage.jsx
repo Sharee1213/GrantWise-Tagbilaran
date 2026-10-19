@@ -15,7 +15,7 @@ import { apiRequest } from "../services/api.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-export function getPortalPathForRole(role, programId = null) {
+export function getPortalPathForRole(role, programId = null, dashboardPath = null) {
   if (role === "Scholar") {
     return programId && /^\d+$/.test(programId)
       ? `/portal/student?programId=${encodeURIComponent(programId)}`
@@ -24,6 +24,9 @@ export function getPortalPathForRole(role, programId = null) {
   if (role === "LGU Admin") return "/portal/lgu-admin";
   if (role === "Barangay Coordinator") return "/portal/barangay-coordinator";
   if (role === "Registrar") return "/portal/school-registrar";
+  if (typeof dashboardPath === "string" && dashboardPath.startsWith("/portal/")) {
+    return dashboardPath;
+  }
   return "/portals";
 }
 
@@ -36,7 +39,7 @@ function validateLoginFields({ email, password }) {
   } else if (trimmedEmail.length > 255) {
     errors.email = "Email address must be 255 characters or fewer.";
   } else if (/\s/.test(trimmedEmail) || !EMAIL_PATTERN.test(trimmedEmail)) {
-    errors.email = "Enter a valid email address (for example, name@school.edu.ph).";
+    errors.email = "Enter a valid email address (for example, name@gmail.com or name@school.edu.ph).";
   }
 
   if (!password) {
@@ -70,7 +73,7 @@ export default function LoginPage() {
     () =>
       location.state?.registeredMessage ||
       (searchParams.get("registered") === "1"
-        ? "Account created successfully. Sign in with your email and password."
+        ? "Account created. Sign in with your registered email and password."
         : ""),
   );
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -96,8 +99,10 @@ export default function LoginPage() {
     let active = true;
     apiRequest("auth/me")
       .then(({ user }) => {
-        if (active) {
-          navigate(getPortalPathForRole(user.role, programId), { replace: true });
+        if (active && user?.role && user?.scopeId) {
+          navigate(getPortalPathForRole(user.role, programId, user.dashboardPath), {
+            replace: true,
+          });
         }
       })
       .catch((requestError) => {
@@ -170,16 +175,28 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      const result = await apiRequest("auth/login", {
+      const loginResult = await apiRequest("auth/login", {
         method: "POST",
         body: JSON.stringify({
           email: normalizedEmail,
           password,
         }),
       });
+      // Retrieve the user's backend-verified role and trusted organizational assignment
+      const sessionResult = await apiRequest("auth/me");
+      const verifiedUser = sessionResult?.user || loginResult?.user;
+      if (!verifiedUser?.role || !verifiedUser?.scopeId) {
+        throw new Error("This account does not have an active role assignment.");
+      }
       setNotice("");
       window.dispatchEvent(new CustomEvent("grantwise:auth-changed"));
-      navigate(getPortalPathForRole(result.user.role, programId));
+      navigate(
+        getPortalPathForRole(
+          verifiedUser.role,
+          programId,
+          verifiedUser.dashboardPath,
+        ),
+      );
     } catch (requestError) {
       setFailedAttempts((count) => count + 1);
       const apiFieldErrors = {};
@@ -214,9 +231,9 @@ export default function LoginPage() {
   return (
     <div className="page-container information-page narrow-page">
       <PageHeading
-        eyebrow="ACCOUNT ACCESS"
+        eyebrow="SHARED ROLE SIGN-IN"
         title="Sign in to GrantWise."
-        description="Enter your registered email address and password to access your student or staff portal."
+        description="Students, LGU Program Admins, Barangay Coordinators, and School Registrars sign in here. After authentication, GrantWise verifies your role and organizational assignment and redirects you to your dashboard."
       />
 
       <div className="auth-card">

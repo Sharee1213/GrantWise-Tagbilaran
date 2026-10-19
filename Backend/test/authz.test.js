@@ -12,7 +12,7 @@ const fixtureUsers = {
         user_id: 11,
         first_name: "Student",
         last_name: "One",
-        email: "one@example.test",
+        email: "one@gmail.com",
         role_name: "Scholar",
         student_id: 101
     },
@@ -20,7 +20,7 @@ const fixtureUsers = {
         user_id: 22,
         first_name: "Student",
         last_name: "Two",
-        email: "two@example.test",
+        email: "two@hnu.edu.ph",
         role_name: "Scholar",
         student_id: 202
     },
@@ -28,21 +28,21 @@ const fixtureUsers = {
         user_id: 23,
         first_name: "Unassigned",
         last_name: "Student",
-        email: "unassigned@example.test",
+        email: "unassigned@gmail.com",
         role_name: "Scholar"
     },
     unsupportedRole: {
         user_id: 24,
         first_name: "Unsupported",
         last_name: "Role",
-        email: "unsupported@example.test",
+        email: "unsupported@gmail.com",
         role_name: "Auditor"
     },
     inactiveStudent: {
         user_id: 25,
         first_name: "Inactive",
         last_name: "Student",
-        email: "inactive@example.test",
+        email: "inactive@gmail.com",
         role_name: "Scholar",
         student_id: 303,
         is_active: false
@@ -51,7 +51,7 @@ const fixtureUsers = {
         user_id: 33,
         first_name: "Coordinator",
         last_name: "One",
-        email: "coordinator@example.test",
+        email: "coordinator@gmail.com",
         role_name: "Barangay Coordinator",
         coordinator_barangay_id: 7
     },
@@ -59,7 +59,7 @@ const fixtureUsers = {
         user_id: 44,
         first_name: "Registrar",
         last_name: "One",
-        email: "registrar@example.test",
+        email: "registrar@hnu.edu.ph",
         role_name: "Registrar",
         registrar_school_id: 31
     },
@@ -67,7 +67,7 @@ const fixtureUsers = {
         user_id: 55,
         first_name: "Admin",
         last_name: "One",
-        email: "admin@example.test",
+        email: "admin@lgu-tagbilaran.example",
         role_name: "LGU Admin",
         funding_unit_id: 41
     }
@@ -282,7 +282,14 @@ class FakePool {
         }
 
         if (sql.startsWith('SELECT role_id FROM "Roles"')) {
-            return { rowCount: 1, rows: [{ role_id: 4 }] };
+            const roleMap = {
+                "LGU Admin": 1,
+                "Barangay Coordinator": 2,
+                Registrar: 3,
+                Scholar: 4
+            };
+            const roleId = roleMap[values[0]] || 4;
+            return { rowCount: 1, rows: [{ role_id: roleId }] };
         }
 
         if (sql.startsWith('INSERT INTO "Users"')) {
@@ -294,6 +301,26 @@ class FakePool {
         if (sql.startsWith('INSERT INTO "Students"')) {
             this.registrationWriteCount = (this.registrationWriteCount || 0) + 1;
             this.insertedStudentValues = values;
+            return { rowCount: 1, rows: [] };
+        }
+
+        if (sql.startsWith('INSERT INTO "LGU_Admins"')) {
+            this.insertedLguAdminValues = values;
+            return { rowCount: 1, rows: [] };
+        }
+
+        if (sql.startsWith('INSERT INTO "Barangay_Coordinators"')) {
+            this.insertedCoordinatorValues = values;
+            return { rowCount: 1, rows: [] };
+        }
+
+        if (sql.startsWith('INSERT INTO "Registrars"')) {
+            this.insertedRegistrarValues = values;
+            return { rowCount: 1, rows: [] };
+        }
+
+        if (sql.startsWith('INSERT INTO "Audit_Logs"')) {
+            this.insertedAuditLogValues = values;
             return { rowCount: 1, rows: [] };
         }
 
@@ -311,7 +338,11 @@ class FakePool {
                         email: user.email,
                         password_hash: loginPasswordHash,
                         is_active: user.is_active !== false,
-                        role_name: user.role_name
+                        role_name: user.role_name,
+                        student_id: user.student_id,
+                        funding_unit_id: user.funding_unit_id,
+                        coordinator_barangay_id: user.coordinator_barangay_id,
+                        registrar_school_id: user.registrar_school_id
                     }]
                     : []
             };
@@ -1331,11 +1362,15 @@ test("login issues an HttpOnly session cookie and logout revokes it", async () =
     const login = await request(app)
         .post("/api/auth/login")
         .set("Origin", FRONTEND_ORIGIN)
-        .send({ email: "one@example.test", password: "correct horse battery staple" });
+        .send({ email: "one@gmail.com", password: "correct horse battery staple" });
 
     assert.equal(login.status, 200);
-    assert.equal(login.body.user.email, "one@example.test");
+    assert.equal(login.body.user.email, "one@gmail.com");
     assert.equal(login.body.user.role, "Scholar");
+    assert.equal(login.body.user.scopeId, 101);
+    assert.equal(login.body.user.dashboardPath, "/portal/student");
+    assert.equal(login.body.emailVerification.enabled, false);
+    assert.equal(login.body.emailVerification.verified, false);
     assert.equal(JSON.stringify(login.body).includes("token"), false);
     const cookie = login.headers["set-cookie"].find((value) =>
         value.startsWith(`${SESSION_COOKIE}=`)
@@ -1348,6 +1383,9 @@ test("login issues an HttpOnly session cookie and logout revokes it", async () =
         .set("Cookie", cookie.split(";")[0]);
     assert.equal(me.status, 200);
     assert.equal(me.body.user.role, "Scholar");
+    assert.equal(me.body.user.scopeId, 101);
+    assert.equal(me.body.user.dashboardPath, "/portal/student");
+    assert.equal(me.body.emailVerification.verified, false);
 
     const logout = await request(app)
         .post("/api/auth/logout")
@@ -1364,9 +1402,9 @@ test("login issues an HttpOnly session cookie and logout revokes it", async () =
 test("login rejects invalid credentials with the same generic response", async () => {
     const responses = [];
     for (const credentials of [
-        { email: "one@example.test", password: "wrong password" },
-        { email: "missing@example.test", password: "wrong password" },
-        { email: "inactive@example.test", password: "correct horse battery staple" }
+        { email: "one@gmail.com", password: "wrong password" },
+        { email: "missing@gmail.com", password: "wrong password" },
+        { email: "inactive@gmail.com", password: "correct horse battery staple" }
     ]) {
         responses.push(
             await request(app)
@@ -1405,29 +1443,39 @@ test("login and registration reject invalid input before database writes", async
             course: ""
         });
     assert.equal(invalidRegistration.status, 400);
-        assert.equal(fakePool.registrationWriteCount || 0, writesBefore);
+    assert.equal(fakePool.registrationWriteCount || 0, writesBefore);
 });
 
-test("registration rejects client-selected roles", async () => {
-    const response = await request(app)
-        .post("/api/auth/register")
-        .set("Origin", FRONTEND_ORIGIN)
-        .send({
-            firstName: "New",
-            lastName: "Student",
-            email: "new@example.test",
-            password: "a sufficiently long password",
-            barangayId: 1,
-            schoolId: 1,
-            studentNumber: "NEW-1",
-            course: "Education",
-            role: "LGU Admin"
-        });
+test("registration rejects client-selected roles and privilege escalation fields", async () => {
+    for (const extraPayload of [
+        { role: "LGU Admin" },
+        { role: "Registrar" },
+        { role: "Barangay Coordinator" },
+        { roleId: 1 },
+        { isAdmin: true },
+        { fundingUnitId: 41 },
+        { scopeId: 41 }
+    ]) {
+        const response = await request(app)
+            .post("/api/auth/register")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                firstName: "New",
+                lastName: "Student",
+                email: "new.student@gmail.com",
+                password: "a sufficiently long password",
+                barangayId: 1,
+                schoolId: 1,
+                studentNumber: "NEW-1",
+                course: "Education",
+                ...extraPayload
+            });
 
-    assert.equal(response.status, 400);
+        assert.equal(response.status, 400);
+    }
 });
 
-test("registration hashes the password and assigns only the Scholar role", async () => {
+test("registration hashes the password, normalizes email, and assigns only the Scholar role", async () => {
     const password = "a sufficiently long password";
     const response = await request(app)
         .post("/api/auth/register")
@@ -1435,7 +1483,7 @@ test("registration hashes the password and assigns only the Scholar role", async
         .send({
             firstName: "New",
             lastName: "Student",
-            email: "new@example.test",
+            email: "  New.Student@Gmail.COM  ",
             password,
             barangayId: 1,
             schoolId: 1,
@@ -1445,16 +1493,82 @@ test("registration hashes the password and assigns only the Scholar role", async
 
     assert.equal(response.status, 201);
     assert.equal(fakePool.insertedUserValues[0], 4);
+    assert.equal(fakePool.insertedUserValues[4], "new.student@gmail.com");
     assert.notEqual(fakePool.insertedUserValues[5], password);
     assert.equal(
         await argon2.verify(fakePool.insertedUserValues[5], password),
         true
     );
     assert.equal(fakePool.insertedStudentValues[0], 88);
+    assert.equal(response.body.emailVerification.enabled, false);
+    assert.equal(response.body.emailVerification.verified, false);
+    assert.equal(response.body.emailVerification.verificationEmailSent, false);
     assert.equal(JSON.stringify(response.body).includes(password), false);
 });
 
-test("registration reports duplicate account details without writing records", async () => {
+test("student registration accepts school-issued email accounts and never grants staff roles from email suffix or prefix", async () => {
+    const password = "a sufficiently long password";
+    const response = await request(app)
+        .post("/api/auth/register")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            firstName: "Maria",
+            lastName: "Santos",
+            email: "registrar.admin@hnu.edu.ph",
+            password,
+            barangayId: 1,
+            schoolId: 1,
+            studentNumber: "HNU-2026-01",
+            course: "BS Information Technology"
+        });
+
+    assert.equal(response.status, 201);
+    // Role ID 4 is Scholar — never Registrar or LGU Admin despite email text/suffix
+    assert.equal(fakePool.insertedUserValues[0], 4);
+    assert.equal(fakePool.insertedUserValues[4], "registrar.admin@hnu.edu.ph");
+});
+
+test("student registration rejects non-Gmail consumer domains, arbitrary domains, and LGU government domains", async () => {
+    const writesBefore = fakePool.registrationWriteCount || 0;
+    const rejectedEmails = [
+        "student@yahoo.com",
+        "student@outlook.com",
+        "student@hotmail.com",
+        "student@icloud.com",
+        "student@googlemail.com",
+        "student@example.test",
+        "admin@tagbilaran.gov.ph",
+        "User <student@gmail.com>",
+        "student..name@gmail.com"
+    ];
+
+    for (const invalidEmail of rejectedEmails) {
+        const response = await request(app)
+            .post("/api/auth/register")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                firstName: "Invalid",
+                lastName: "Email",
+                email: invalidEmail,
+                password: "a sufficiently long password",
+                barangayId: 1,
+                schoolId: 1,
+                studentNumber: "INV-1",
+                course: "Education"
+            });
+
+        assert.equal(response.status, 400, `Expected 400 for ${invalidEmail}`);
+        assert.equal(
+            response.body.errors.some(({ field }) => field === "email"),
+            true,
+            `Expected email field error for ${invalidEmail}`
+        );
+    }
+
+    assert.equal(fakePool.registrationWriteCount || 0, writesBefore);
+});
+
+test("registration reports duplicate account details case-insensitively without writing records", async () => {
     const duplicatePool = new FakePool();
     duplicatePool.duplicateEmail = true;
     const duplicateApp = createApp({
@@ -1470,7 +1584,7 @@ test("registration reports duplicate account details without writing records", a
         .send({
             firstName: "Existing",
             lastName: "Student",
-            email: "existing@example.test",
+            email: "  EXISTING.STUDENT@GMAIL.COM ",
             password: "a sufficiently long password",
             barangayId: 1,
             schoolId: 1,
@@ -1481,6 +1595,237 @@ test("registration reports duplicate account details without writing records", a
     assert.equal(response.status, 409);
     assert.match(response.body.message, /email or student number already exists/);
     assert.equal(duplicatePool.registrationWriteCount || 0, 0);
+});
+
+test("shared login authenticates all four roles and returns backend-verified role, scopeId, and dashboard redirect path", async () => {
+    const roleExpectations = [
+        {
+            email: "  ONE@GMAIL.COM ",
+            expectedEmail: "one@gmail.com",
+            expectedRole: "Scholar",
+            expectedScopeId: 101,
+            expectedScopeType: "student",
+            expectedDashboardPath: "/portal/student"
+        },
+        {
+            email: "coordinator@gmail.com",
+            expectedEmail: "coordinator@gmail.com",
+            expectedRole: "Barangay Coordinator",
+            expectedScopeId: 7,
+            expectedScopeType: "barangay",
+            expectedDashboardPath: "/portal/barangay-coordinator"
+        },
+        {
+            email: "registrar@hnu.edu.ph",
+            expectedEmail: "registrar@hnu.edu.ph",
+            expectedRole: "Registrar",
+            expectedScopeId: 31,
+            expectedScopeType: "school",
+            expectedDashboardPath: "/portal/school-registrar"
+        },
+        {
+            email: "admin@lgu-tagbilaran.example",
+            expectedEmail: "admin@lgu-tagbilaran.example",
+            expectedRole: "LGU Admin",
+            expectedScopeId: 41,
+            expectedScopeType: "funding_unit",
+            expectedDashboardPath: "/portal/lgu-admin"
+        }
+    ];
+
+    for (const item of roleExpectations) {
+        const login = await request(app)
+            .post("/api/auth/login")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                email: item.email,
+                password: "correct horse battery staple"
+            });
+
+        assert.equal(login.status, 200, `login for ${item.expectedRole}`);
+        assert.equal(login.body.user.email, item.expectedEmail);
+        assert.equal(login.body.user.role, item.expectedRole);
+        assert.equal(login.body.user.scopeId, item.expectedScopeId);
+        assert.equal(login.body.user.scopeType, item.expectedScopeType);
+        assert.equal(login.body.user.dashboardPath, item.expectedDashboardPath);
+
+        const cookie = login.headers["set-cookie"]
+            .find((value) => value.startsWith(`${SESSION_COOKIE}=`))
+            .split(";")[0];
+
+        const me = await request(app)
+            .get("/api/auth/me")
+            .set("Cookie", cookie);
+        assert.equal(me.status, 200);
+        assert.equal(me.body.user.role, item.expectedRole);
+        assert.equal(me.body.user.scopeId, item.expectedScopeId);
+        assert.equal(me.body.user.dashboardPath, item.expectedDashboardPath);
+    }
+});
+
+test("LGU Admin email policy rejects personal Gmail and enforces configured ALLOWED_LGU_EMAIL_DOMAINS when set", async () => {
+    const configuredPool = new StaffPortalPool();
+    const configuredApp = createApp({
+        pool: configuredPool,
+        env: {
+            NODE_ENV: "test",
+            FRONTEND_ORIGIN,
+            ALLOWED_LGU_EMAIL_DOMAINS: "tagbilaran-lgu.gov.ph",
+            ALLOWED_SCHOOL_EMAIL_DOMAINS: "hnu.edu.ph,bisu.edu.ph"
+        },
+        logger: { error() {} }
+    });
+
+    // adminA has email admin@lgu-tagbilaran.example, which does not match ALLOWED_LGU_EMAIL_DOMAINS=tagbilaran-lgu.gov.ph
+    const mismatchLogin = await request(configuredApp)
+        .post("/api/auth/login")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            email: "admin@lgu-tagbilaran.example",
+            password: "correct horse battery staple"
+        });
+    assert.equal(mismatchLogin.status, 403);
+    assert.match(mismatchLogin.body.message, /official LGU/i);
+});
+
+test("privileged staff provisioning requires LGU Admin authentication and enforces role-specific email policies", async () => {
+    const unconfiguredPool = new StaffPortalPool();
+    const unconfiguredApp = createApp({
+        pool: unconfiguredPool,
+        env: {
+            NODE_ENV: "test",
+            FRONTEND_ORIGIN
+        },
+        logger: { error() {} }
+    });
+
+    // Unauthenticated caller cannot provision staff
+    const unauth = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            role: "Registrar",
+            firstName: "Reg",
+            lastName: "One",
+            email: "registrar2@hnu.edu.ph",
+            password: "a sufficiently long password",
+            schoolId: 1
+        });
+    assert.equal(unauth.status, 401);
+
+    // Student, Coordinator, and Registrar cannot provision staff accounts
+    for (const nonAdminToken of [tokens.studentA, tokens.coordinatorA, tokens.registrarA]) {
+        const forbidden = await request(unconfiguredApp)
+            .post("/api/admin/staff-accounts")
+            .set("Origin", FRONTEND_ORIGIN)
+            .set("Cookie", `${SESSION_COOKIE}=${nonAdminToken}`)
+            .send({
+                role: "Registrar",
+                firstName: "Reg",
+                lastName: "One",
+                email: "registrar2@hnu.edu.ph",
+                password: "a sufficiently long password",
+                schoolId: 1
+            });
+        assert.equal(forbidden.status, 403);
+    }
+
+    // LGU Admin cannot use personal Gmail
+    const gmailAdmin = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "LGU Admin",
+            firstName: "Admin",
+            lastName: "Gmail",
+            email: "lgu.admin@gmail.com",
+            password: "a sufficiently long password",
+            fundingUnitId: 41
+        });
+    assert.equal(gmailAdmin.status, 400);
+
+    // Provisioning a new LGU Admin without confirmed ALLOWED_LGU_EMAIL_DOMAINS fails closed (503) rather than inventing a domain
+    const unconfirmedLguDomain = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "LGU Admin",
+            firstName: "Admin",
+            lastName: "Unconfirmed",
+            email: "officer@unconfirmed-lgu.org",
+            password: "a sufficiently long password",
+            fundingUnitId: 41
+        });
+    assert.equal(unconfirmedLguDomain.status, 503);
+    assert.match(unconfirmedLguDomain.body.message, /ALLOWED_LGU_EMAIL_DOMAINS/);
+
+    // Barangay Coordinator accepts personal Gmail and rejects Yahoo or school .edu.ph
+    const invalidCoordYahoo = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "Barangay Coordinator",
+            firstName: "Brgy",
+            lastName: "Coord",
+            email: "coord@yahoo.com",
+            password: "a sufficiently long password",
+            barangayId: 1
+        });
+    assert.equal(invalidCoordYahoo.status, 400);
+
+    const validCoordGmail = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "Barangay Coordinator",
+            firstName: "Brgy",
+            lastName: "Coord",
+            email: "  Brgy.Coord@GMAIL.COM ",
+            password: "a sufficiently long password",
+            barangayId: 1
+        });
+    assert.equal(validCoordGmail.status, 201);
+    assert.equal(validCoordGmail.body.staffAccount.email, "brgy.coord@gmail.com");
+    assert.equal(validCoordGmail.body.staffAccount.role, "Barangay Coordinator");
+    assert.equal(validCoordGmail.body.staffAccount.scopeId, 1);
+    assert.equal(validCoordGmail.body.staffAccount.dashboardPath, "/portal/barangay-coordinator");
+
+    // Registrar accepts personal Gmail or official school email, and rejects .gov.ph or Yahoo
+    const invalidRegistrarGov = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "Registrar",
+            firstName: "School",
+            lastName: "Reg",
+            email: "registrar@tagbilaran.gov.ph",
+            password: "a sufficiently long password",
+            schoolId: 1
+        });
+    assert.equal(invalidRegistrarGov.status, 400);
+
+    const validRegistrarSchool = await request(unconfiguredApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({
+            role: "Registrar",
+            firstName: "School",
+            lastName: "Reg",
+            email: "Records.Office@HNU.EDU.PH",
+            password: "a sufficiently long password",
+            schoolId: 1
+        });
+    assert.equal(validRegistrarSchool.status, 201);
+    assert.equal(validRegistrarSchool.body.staffAccount.email, "records.office@hnu.edu.ph");
+    assert.equal(validRegistrarSchool.body.staffAccount.role, "Registrar");
+    assert.equal(validRegistrarSchool.body.staffAccount.scopeId, 1);
+    assert.equal(validRegistrarSchool.body.staffAccount.dashboardPath, "/portal/school-registrar");
 });
 
 test("lookups return only barangays and approved schools", async () => {
@@ -1497,7 +1842,7 @@ test("state-changing authentication requests reject untrusted origins", async ()
     const response = await request(app)
         .post("/api/auth/login")
         .set("Origin", "https://unexpected.example")
-        .send({ email: "one@example.test", password: "wrong password" });
+        .send({ email: "one@gmail.com", password: "wrong password" });
 
     assert.equal(response.status, 403);
 });
@@ -1505,7 +1850,7 @@ test("state-changing authentication requests reject untrusted origins", async ()
 test("state-changing authentication requests reject a missing Origin", async () => {
     const response = await request(app)
         .post("/api/auth/login")
-        .send({ email: "one@example.test", password: "wrong password" });
+        .send({ email: "one@gmail.com", password: "wrong password" });
     assert.equal(response.status, 403);
 });
 
