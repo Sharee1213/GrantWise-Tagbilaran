@@ -81,6 +81,83 @@ async function getSchemaCapabilities(pool) {
                           (event_object_table = 'Applications'
                            AND trigger_name IN (
                                'trg_application_barangay_check',
+const verificationDecisionSchema = z.object({
+    status: z.enum(["approved", "rejected", "needs_information", "pending"]),
+    remarks: z.string().trim().max(2000).optional().nullable()
+}).strict();
+
+const applicationDecisionSchema = z.object({
+    status: z.enum(["approved", "rejected", "needs_information"]),
+    awardAmount: z.number().finite().positive().max(9999999999.99)
+        .refine((value) => Number.isInteger(value * 100), "Use no more than two decimal places.")
+        .optional(),
+    remarks: z.string().trim().max(2000).optional().nullable()
+}).strict().refine(
+    (value) => value.status !== "approved" || value.awardAmount !== undefined,
+    { message: "An award amount is required for approval.", path: ["awardAmount"] }
+).refine(
+    (value) => value.status === "approved" || value.awardAmount === undefined,
+    { message: "An award amount is only valid when approving.", path: ["awardAmount"] }
+);
+
+const isoDateSchema = z.string().refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+        !Number.isNaN(date.valueOf()) &&
+        date.toISOString().slice(0, 10) === value;
+}, "Use a valid calendar date in YYYY-MM-DD format.");
+
+const programCreateSchema = z.object({
+    programName: z.string().trim().min(1).max(200),
+    fundingCycleId: z.number().int().positive(),
+    totalBudget: z.number().finite().positive().max(999999999999.99)
+        .refine((value) => Number.isInteger(value * 100), "Use no more than two decimal places."),
+    startDate: isoDateSchema.nullable().optional(),
+    endDate: isoDateSchema.nullable().optional()
+}).strict().refine(
+    (value) => !value.startDate || !value.endDate || value.endDate >= value.startDate,
+    { message: "End date must be on or after the start date.", path: ["endDate"] }
+);
+
+const allocationSchema = z.object({
+    allocations: z.array(z.object({
+        barangayId: z.number().int().positive(),
+        allocatedAmount: z.number().finite().nonnegative().max(999999999999.99)
+            .refine((value) => Number.isInteger(value * 100), "Use no more than two decimal places.")
+    }).strict()).min(1).max(MAX_QUEUE_SIZE)
+}).strict().refine(
+    ({ allocations }) =>
+        new Set(allocations.map(({ barangayId }) => barangayId)).size === allocations.length,
+    { message: "Each barangay may be listed only once.", path: ["allocations"] }
+);
+
+const programUpdateSchema = z.object({
+    programName: z.string().trim().min(1).max(200).optional(),
+    status: z.enum(["active", "inactive", "closed"]).optional(),
+    startDate: isoDateSchema.nullable().optional(),
+    endDate: isoDateSchema.nullable().optional()
+}).strict().refine(
+    (value) => Object.keys(value).length > 0,
+    { message: "At least one permitted program field is required." }
+).refine(
+    (value) => !value.startDate || !value.endDate || value.endDate >= value.startDate,
+    { message: "End date must be on or after the start date.", path: ["endDate"] }
+);
+
+const gradeReportSchema = z.object({
+    schoolYear: z.string().trim().min(1).max(20),
+    semester: z.string().trim().min(1).max(20),
+    gpa: z.number().finite().min(0).max(99.99)
+        .refine((value) => Number.isInteger(value * 100), "Use no more than two decimal places."),
+    remarks: z.string().trim().max(2000).optional().nullable()
+}).strict();
+
+const eligibilityCheckSchema = z.object({
+    checkType: z.string().trim().min(1).max(50),
+    result: z.enum(["eligible", "ineligible", "pending"]),
+    remarks: z.string().trim().max(2000).optional().nullable()
+}).strict();
+
                                'trg_application_status_transition',
                                'trg_application_funding_unit_scope',
                                'trg_initialize_application_verification'
@@ -95,7 +172,25 @@ async function getSchemaCapabilities(pool) {
                 )
             ) AS application_workflow_schema,
             to_regclass('"Application_Verifications"') IS NOT NULL
-                AS has_verification_table`
+            AS has_verification_table,
+            to_regprocedure('approve_award(integer,integer)') IS NOT NULL
+            AS has_award_approval_function,
+            (
+            SELECT COUNT(DISTINCT trigger_name) = 5
+            FROM information_schema.triggers
+            WHERE event_object_schema = current_schema()
+              AND event_object_table IN (
+                  'Funding_Programs', 'Program_Barangay_Allocations',
+                  'LGU_Admins', 'Scholarship_Awards'
+              )
+              AND trigger_name IN (
+                  'trg_validate_program_funding_scope',
+                  'trg_validate_program_budget_totals',
+                  'trg_validate_program_barangay_allocation',
+                  'trg_validate_lgu_admin_funding_unit',
+                  'trg_validate_award_status_transition'
+              )
+            ) AS has_staff_admin_workflow`
     );
     const capabilities = result.rows[0];
     return {
@@ -115,6 +210,26 @@ function setSessionCookie(res, token, secure) {
         sameSite: "strict",
         path: "/api",
         maxAge: SESSION_DURATION_MS
+            EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'LGU_Admins'
+                  AND column_name = 'funding_unit_id'
+            ) AS has_admin_funding_unit_assignment,
+            (
+                EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'reserved_budget'
+                )
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'released_budget'
+                )
+            ) AS has_program_budget_balances,
     });
 }
 
@@ -147,6 +262,17 @@ function createApp({
         credentials: true,
         origin(origin, callback) {
             callback(null, !origin || allowedOrigins.has(origin));
+        hasAdminFundingUnitAssignment: capabilities.has_admin_funding_unit_assignment,
+        hasProgramBudgetBalances: capabilities.has_program_budget_balances,
+        hasAwardApprovalFunction: capabilities.has_award_approval_function,
+        hasStaffAdminWorkflow: capabilities.has_staff_admin_workflow,
+        adminPortalEnabled:
+            capabilities.relational_program_schema &&
+            capabilities.application_workflow_schema &&
+            capabilities.has_admin_funding_unit_assignment &&
+            capabilities.has_program_budget_balances &&
+            capabilities.has_award_approval_function &&
+            capabilities.has_staff_admin_workflow,
         }
     }));
     app.use(express.json({ limit: "32kb", strict: true }));
@@ -455,7 +581,7 @@ function createApp({
                 `SELECT u.user_id, u.first_name, u.last_name, u.email,
                         r.role_name,
                         student.student_id,
-                        admin.funding_unit_id,
+                        ${adminFundingUnit} AS funding_unit_id,
                         coordinator.barangay_id AS coordinator_barangay_id,
                         registrar.school_id AS registrar_school_id
                  FROM "Login_Sessions" session
@@ -530,6 +656,10 @@ function createApp({
              WHERE token_hash = $1 AND revoked_at IS NULL`,
             [tokenHash(req.cookies[SESSION_COOKIE])]
         );
+            const capabilities = await getSchemaCapabilities(pool);
+            const adminFundingUnit = capabilities.hasAdminFundingUnitAssignment
+                ? "admin.funding_unit_id"
+                : "NULL::INTEGER";
         clearSessionCookie(res, secureCookies);
         return res.json({ message: "Signed out." });
     });
@@ -574,6 +704,14 @@ function createApp({
         "/api/student/applications",
         requireAuthentication,
         requireRole("Scholar"),
+                if (
+                    row.role_name === "LGU Admin" &&
+                    !capabilities.hasAdminFundingUnitAssignment
+                ) {
+                    return res.status(503).json({
+                        message: "The funding-unit assignment schema is not installed."
+                    });
+                }
         async (req, res) => {
             const capabilities = await getSchemaCapabilities(pool);
             const result = capabilities.relationalProgramSchema
@@ -602,6 +740,570 @@ function createApp({
                      JOIN "Funding_Programs" program ON program.program_id = application.program_id
                      WHERE student.user_id = $1 AND student.is_active = TRUE
                      ORDER BY application.created_at DESC
+    async function requireStaffSchema(res, { admin = false } = {}) {
+        const capabilities = await getSchemaCapabilities(pool);
+        const available = admin
+            ? capabilities.adminPortalEnabled
+            : capabilities.applicationWorkflowEnabled;
+        if (!available) {
+            res.status(503).json({
+                message: admin
+                    ? "The funding-unit assignment, budget, and verification workflow schema is not installed."
+                    : "The application verification workflow schema is not installed."
+            });
+            return false;
+        }
+        return true;
+    }
+
+    function parseStaffPage(req, res) {
+        const rawLimit = req.query.limit === undefined ? "25" : req.query.limit;
+        const rawOffset = req.query.offset === undefined ? "0" : req.query.offset;
+        if (
+            typeof rawLimit !== "string" ||
+            typeof rawOffset !== "string" ||
+            !/^\d+$/.test(rawLimit) ||
+            !/^\d+$/.test(rawOffset)
+        ) {
+            res.status(400).json({ message: "Pagination values are invalid." });
+            return null;
+        }
+        const limit = Number(rawLimit);
+        const offset = Number(rawOffset);
+        if (
+            !Number.isSafeInteger(limit) || limit < 1 || limit > MAX_QUEUE_SIZE ||
+            !Number.isSafeInteger(offset) || offset < 0
+        ) {
+            res.status(400).json({ message: "Pagination values are outside the allowed range." });
+            return null;
+        }
+        return { limit, offset };
+    }
+
+    function parsePositiveId(value, label, res) {
+        const id = Number(value);
+        if (!Number.isSafeInteger(id) || id < 1) {
+            res.status(400).json({ message: `${label} is invalid.` });
+            return null;
+        }
+        return id;
+    }
+
+    app.get(
+        "/api/admin/dashboard",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const result = await pool.query(
+                `SELECT COUNT(*)::INTEGER AS program_count,
+                        COALESCE(SUM(program.total_budget), 0)::NUMERIC AS total_budget,
+                        COALESCE(SUM(program.remaining_budget), 0)::NUMERIC
+                            AS remaining_budget,
+                        COALESCE(SUM(program.reserved_budget), 0)::NUMERIC
+                            AS reserved_budget,
+                        COALESCE(SUM(program.released_budget), 0)::NUMERIC
+                            AS released_budget,
+                        (SELECT COUNT(*)::INTEGER
+                         FROM "Applications" application
+                         JOIN "Funding_Programs" scoped_program
+                           ON scoped_program.program_id = application.program_id
+                         WHERE scoped_program.funding_unit_id = $1)
+                            AS application_count,
+                        (SELECT COUNT(*)::INTEGER
+                         FROM "Applications" application
+                         JOIN "Funding_Programs" scoped_program
+                           ON scoped_program.program_id = application.program_id
+                         WHERE scoped_program.funding_unit_id = $1
+                           AND application.application_status IN
+                               ('submitted', 'barangay_verification',
+                                'registrar_verification', 'lgu_review'))
+                            AS in_review_count
+                 FROM "Funding_Programs" program
+                 WHERE program.funding_unit_id = $1`,
+                [req.auth.scopeId]
+            );
+            return res.json({ summary: result.rows[0] });
+        }
+    );
+
+    app.get(
+        "/api/admin/programs",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const page = parseStaffPage(req, res);
+            if (!page) return;
+            const result = await pool.query(
+                `SELECT program.program_id, program.program_name,
+                        program.funding_cycle_id, cycle.cycle_code,
+                        program.total_budget, program.remaining_budget,
+                        program.reserved_budget, program.released_budget,
+                        program.status, program.start_date, program.end_date,
+                        COALESCE(allocations.items, '[]'::JSON) AS barangay_allocations
+                 FROM "Funding_Programs" program
+                 JOIN "Funding_Cycles" cycle
+                   ON cycle.funding_cycle_id = program.funding_cycle_id
+                 LEFT JOIN LATERAL (
+                     SELECT json_agg(json_build_object(
+                         'barangayId', allocation.barangay_id,
+                         'barangayName', barangay.barangay_name,
+                         'allocatedAmount', allocation.allocated_amount,
+                         'reservedAmount', allocation.reserved_amount,
+                         'releasedAmount', allocation.released_amount,
+                         'availableAmount', allocation.allocated_amount -
+                             allocation.reserved_amount - allocation.released_amount
+                     ) ORDER BY barangay.barangay_name) AS items
+                     FROM "Program_Barangay_Allocations" allocation
+                     JOIN "Barangays" barangay
+                       ON barangay.barangay_id = allocation.barangay_id
+                     WHERE allocation.program_id = program.program_id
+                 ) allocations ON TRUE
+                 WHERE program.funding_unit_id = $1
+                 ORDER BY program.created_at DESC, program.program_id DESC
+                 LIMIT $2 OFFSET $3`,
+                [req.auth.scopeId, page.limit, page.offset]
+            );
+            return res.json({ programs: result.rows, pagination: page });
+        }
+    );
+
+    app.put(
+        "/api/admin/programs/:programId/barangay-allocations",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res, next) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const programId = parsePositiveId(req.params.programId, "Program ID", res);
+            if (!programId) return;
+            const input = allocationSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Barangay allocations are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+            const barangayIds = input.data.allocations.map(({ barangayId }) => barangayId);
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                const scopedProgram = await client.query(
+                    `SELECT program_id
+                     FROM "Funding_Programs"
+                     WHERE program_id = $1 AND funding_unit_id = $2`,
+                    [programId, req.auth.scopeId]
+                );
+                if (scopedProgram.rowCount === 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(404).json({ message: "Program not found." });
+                }
+                await client.query(
+                    `SELECT allocation_id
+                     FROM "Program_Barangay_Allocations"
+                     WHERE program_id = $1
+                     ORDER BY allocation_id
+                     FOR UPDATE`,
+                    [programId]
+                );
+                const program = await client.query(
+                    `SELECT program_id, total_budget
+                     FROM "Funding_Programs"
+                     WHERE program_id = $1 AND funding_unit_id = $2
+                     FOR UPDATE`,
+                    [programId, req.auth.scopeId]
+                );
+                const requestedCents = input.data.allocations.reduce(
+                    (total, allocation) => total + Math.round(allocation.allocatedAmount * 100),
+                    0
+                );
+                if (requestedCents > Math.round(Number(program.rows[0].total_budget) * 100)) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: "Barangay allocations cannot exceed the program budget."
+                    });
+                }
+                const knownBarangays = await client.query(
+                    `SELECT barangay_id
+                     FROM "Barangays"
+                     WHERE barangay_id = ANY($1::INTEGER[])`,
+                    [barangayIds]
+                );
+                if (knownBarangays.rowCount !== barangayIds.length) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: "One or more barangays do not exist."
+                    });
+                }
+                await client.query(
+                    `DELETE FROM "Program_Barangay_Allocations"
+                     WHERE program_id = $1
+                       AND NOT (barangay_id = ANY($2::INTEGER[]))`,
+                    [programId, barangayIds]
+                );
+                for (const allocation of input.data.allocations) {
+                    await client.query(
+                        `INSERT INTO "Program_Barangay_Allocations" (
+                            program_id, barangay_id, allocated_amount
+                         ) VALUES ($1, $2, $3)
+                         ON CONFLICT (program_id, barangay_id)
+                         DO UPDATE SET allocated_amount = EXCLUDED.allocated_amount,
+                                       updated_at = NOW()`,
+                        [programId, allocation.barangayId, allocation.allocatedAmount]
+                    );
+                }
+                const allocations = await client.query(
+                    `SELECT allocation.barangay_id, barangay.barangay_name,
+                            allocation.allocated_amount, allocation.reserved_amount,
+                            allocation.released_amount,
+                            allocation.allocated_amount - allocation.reserved_amount -
+                                allocation.released_amount AS available_amount
+                     FROM "Program_Barangay_Allocations" allocation
+                     JOIN "Barangays" barangay
+                       ON barangay.barangay_id = allocation.barangay_id
+                     WHERE allocation.program_id = $1
+                     ORDER BY barangay.barangay_name`,
+                    [programId]
+                );
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'program_barangay_allocations_updated',
+                               'Funding_Programs', $2,
+                               jsonb_build_object('allocation_count', $3))`,
+                    [req.auth.userId, programId, allocations.rowCount]
+                );
+                await client.query("COMMIT");
+                return res.json({ allocations: allocations.rows });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Program allocation rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (["P0001", "23514"].includes(error.code)) {
+                    return res.status(409).json({
+                        message: "The allocations could not be saved because committed or released funding would be affected."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
+    app.get(
+        "/api/admin/programs/:programId",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const programId = parsePositiveId(req.params.programId, "Program ID", res);
+            if (!programId) return;
+            const result = await pool.query(
+                `SELECT program.program_id, program.program_name,
+                        program.funding_cycle_id, cycle.cycle_code,
+                        program.total_budget, program.remaining_budget,
+                        program.reserved_budget, program.released_budget,
+                        program.status, program.start_date, program.end_date,
+                        COALESCE(allocations.items, '[]'::JSON) AS barangay_allocations
+                 FROM "Funding_Programs" program
+                 JOIN "Funding_Cycles" cycle
+                   ON cycle.funding_cycle_id = program.funding_cycle_id
+                 LEFT JOIN LATERAL (
+                     SELECT json_agg(json_build_object(
+                         'barangayId', allocation.barangay_id,
+                         'barangayName', barangay.barangay_name,
+                         'allocatedAmount', allocation.allocated_amount,
+                         'reservedAmount', allocation.reserved_amount,
+                         'releasedAmount', allocation.released_amount,
+                         'availableAmount', allocation.allocated_amount -
+                             allocation.reserved_amount - allocation.released_amount
+                     ) ORDER BY barangay.barangay_name) AS items
+                     FROM "Program_Barangay_Allocations" allocation
+                     JOIN "Barangays" barangay
+                       ON barangay.barangay_id = allocation.barangay_id
+                     WHERE allocation.program_id = program.program_id
+                 ) allocations ON TRUE
+                 WHERE program.program_id = $1
+                   AND program.funding_unit_id = $2`,
+                [programId, req.auth.scopeId]
+            );
+            if (result.rowCount === 0) {
+                return res.status(404).json({ message: "Program not found." });
+            }
+            return res.json({ program: result.rows[0] });
+        }
+    );
+
+    app.post(
+        "/api/admin/programs",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res, next) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const input = programCreateSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Program details are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                const cycle = await client.query(
+                    `SELECT funding_cycle_id
+                     FROM "Funding_Cycles"
+                     WHERE funding_cycle_id = $1
+                       AND status = 'active'
+                       AND (start_date IS NULL OR start_date <= CURRENT_DATE)
+                       AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+                     FOR SHARE`,
+                    [input.data.fundingCycleId]
+                );
+                if (cycle.rowCount === 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: "Choose an active funding cycle."
+                    });
+                }
+                const result = await client.query(
+                    `INSERT INTO "Funding_Programs" (
+                        program_name, funding_unit_id, funding_cycle_id,
+                        total_budget, remaining_budget, reserved_budget,
+                        released_budget, status, start_date, end_date
+                     ) VALUES ($1, $2, $3, $4, $4, 0, 0, 'active', $5, $6)
+                     RETURNING program_id, program_name, funding_cycle_id,
+                               total_budget, remaining_budget, reserved_budget,
+                               released_budget, status, start_date, end_date`,
+                    [
+                        input.data.programName,
+                        req.auth.scopeId,
+                        input.data.fundingCycleId,
+                        input.data.totalBudget,
+                        input.data.startDate || null,
+                        input.data.endDate || null
+                    ]
+                );
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'funding_program_created', 'Funding_Programs', $2,
+                               jsonb_build_object(
+                                   'funding_unit_id', $3,
+                                   'funding_cycle_id', $4
+                               ))`,
+                    [
+                        req.auth.userId,
+                        result.rows[0].program_id,
+                        req.auth.scopeId,
+                        input.data.fundingCycleId
+                    ]
+                );
+                await client.query("COMMIT");
+                return res.status(201).json({ program: result.rows[0] });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Program creation rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (error.code === "23514") {
+                    return res.status(400).json({
+                        message: "Program dates or budget do not satisfy database constraints."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
+    app.get(
+        "/api/admin/funding-cycles",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const result = await pool.query(
+                `SELECT funding_cycle_id, cycle_code, start_date, end_date
+                 FROM "Funding_Cycles"
+                 WHERE status = 'active'
+                   AND (start_date IS NULL OR start_date <= CURRENT_DATE)
+                   AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+                 ORDER BY start_date DESC NULLS LAST, cycle_code DESC
+                 LIMIT $1`,
+                [MAX_QUEUE_SIZE]
+            );
+            return res.json({ fundingCycles: result.rows });
+        }
+    );
+
+    app.patch(
+        "/api/admin/programs/:programId",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res, next) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const programId = parsePositiveId(req.params.programId, "Program ID", res);
+            if (!programId) return;
+            const input = programUpdateSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Program updates are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+            const fields = {
+                programName: "program_name",
+                status: "status",
+                startDate: "start_date",
+                endDate: "end_date"
+            };
+            const values = [programId, req.auth.scopeId, req.auth.userId];
+            const updates = Object.entries(input.data).map(([key, value]) => {
+                values.push(value);
+                return `${fields[key]} = $${values.length}`;
+            });
+            values.push(JSON.stringify(Object.keys(input.data)));
+            const changedFieldsIndex = values.length;
+            let result;
+            try {
+                result = await pool.query(
+                    `WITH updated_program AS (
+                         UPDATE "Funding_Programs"
+                         SET ${updates.join(", ")}
+                         WHERE program_id = $1 AND funding_unit_id = $2
+                         RETURNING program_id, program_name, funding_cycle_id,
+                                   total_budget, remaining_budget, reserved_budget,
+                                   released_budget, status, start_date, end_date
+                     ),
+                     logged AS (
+                         INSERT INTO "Audit_Logs" (
+                             user_id, action_type, entity_type, entity_id, details
+                         )
+                         SELECT $3, 'funding_program_updated', 'Funding_Programs',
+                                program_id,
+                                jsonb_build_object(
+                                    'changed_fields', $${changedFieldsIndex}::JSONB
+                                )
+                         FROM updated_program
+                         RETURNING log_id
+                     )
+                     SELECT updated_program.*
+                     FROM updated_program CROSS JOIN logged`,
+                    values
+                );
+            } catch (error) {
+                if (error.code === "23514") {
+                    return res.status(400).json({
+                        message: "Program dates or status do not satisfy database constraints."
+                    });
+                }
+                return next(error);
+            }
+            if (result.rowCount === 0) {
+                return res.status(404).json({ message: "Program not found." });
+            }
+            return res.json({ program: result.rows[0] });
+        }
+    );
+
+    app.get(
+        "/api/admin/applications",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const page = parseStaffPage(req, res);
+            if (!page) return;
+            const result = await pool.query(
+                `SELECT application.application_id, application.application_status,
+                        application.submitted_at, application.created_at,
+                        program.program_id, program.program_name,
+                        student.student_number, student.course, student.year_level,
+                        student_user.first_name, student_user.last_name,
+                        school.school_name, barangay.barangay_name
+                 FROM "Applications" application
+                 JOIN "Funding_Programs" program
+                   ON program.program_id = application.program_id
+                 JOIN "Students" student ON student.student_id = application.student_id
+                 JOIN "Users" student_user ON student_user.user_id = student.user_id
+                 JOIN "Schools" school ON school.school_id = student.school_id
+                 JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+                 WHERE program.funding_unit_id = $1
+                 ORDER BY application.created_at DESC, application.application_id DESC
+                 LIMIT $2 OFFSET $3`,
+                [req.auth.scopeId, page.limit, page.offset]
+            );
+            return res.json({ applications: result.rows, pagination: page });
+        }
+    );
+
+    app.get(
+        "/api/admin/applications/:applicationId",
+        requireAuthentication,
+        requireRole("LGU Admin"),
+        async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: true })) return;
+            const applicationId = parsePositiveId(
+                req.params.applicationId,
+                "Application ID",
+                res
+            );
+            if (!applicationId) return;
+            const result = await pool.query(
+                `SELECT application.application_id, application.application_status,
+                        application.submitted_at, application.reviewed_at,
+                        application.remarks, application.created_at,
+                        program.program_id, program.program_name,
+                        student.student_number, student.course, student.year_level,
+                        student_user.first_name, student_user.last_name,
+                        school.school_name, barangay.barangay_name
+                 FROM "Applications" application
+                 JOIN "Funding_Programs" program
+                   ON program.program_id = application.program_id
+                 JOIN "Students" student ON student.student_id = application.student_id
+                 JOIN "Users" student_user ON student_user.user_id = student.user_id
+                 JOIN "Schools" school ON school.school_id = student.school_id
+                 JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+                 WHERE application.application_id = $1
+                   AND program.funding_unit_id = $2`,
+                [applicationId, req.auth.scopeId]
+            );
+            if (result.rowCount === 0) {
+                return res.status(404).json({ message: "Application not found." });
+            }
+            const verifications = await pool.query(
+                `SELECT verification_type, status, remarks, activated_at, reviewed_at
+                 FROM "Application_Verifications"
+                 WHERE application_id = $1
+                 ORDER BY activated_at`,
+                [applicationId]
+            );
+            return res.json({
+                application: result.rows[0],
+                verifications: verifications.rows
+            });
+        }
+    );
+
                      LIMIT $2`,
                     [req.auth.userId, MAX_QUEUE_SIZE]
                 );
@@ -917,17 +1619,20 @@ function createApp({
         });
 
         app.get(`${path}/:verificationId`, ...roleMiddleware, async (req, res) => {
-            const verificationId = Number(req.params.verificationId);
-            if (!Number.isSafeInteger(verificationId) || verificationId < 1) {
-                return res.status(400).json({ message: "Verification ID is invalid." });
-            }
+            if (!await requireStaffSchema(res, { admin: role === "LGU Admin" })) return;
+            const verificationId = parsePositiveId(
+                req.params.verificationId,
+                "Verification ID",
+                res
+            );
+            if (!verificationId) return;
             const result = await pool.query(
                 `SELECT verification.verification_id, verification.application_id,
                         verification.verification_type, verification.status,
                         verification.activated_at, verification.reviewed_at,
                         application.application_status,
                         program.program_name,
-                        student.student_id, student.student_number, student.course, student.year_level,
+                        student.student_number, student.course, student.year_level,
                         student_user.first_name, student_user.last_name,
                         school.school_name, barangay.barangay_name
                  FROM "Application_Verifications" verification
@@ -946,7 +1651,47 @@ function createApp({
             if (result.rowCount === 0) {
                 return res.status(404).json({ message: "Verification task not found." });
             }
-            return res.json({ verification: result.rows[0] });
+            const response = { verification: result.rows[0] };
+            if (role === "Registrar") {
+                const academicRecords = await pool.query(
+                    `SELECT grade_report.school_year, grade_report.semester,
+                            grade_report.gpa, grade_report.remarks,
+                            grade_report.submitted_at
+                     FROM "Grade_Reports" grade_report
+                     JOIN "Registrars" registrar
+                       ON registrar.registrar_id = grade_report.registrar_id
+                     WHERE grade_report.student_id = (
+                         SELECT application.student_id
+                         FROM "Applications" application
+                         WHERE application.application_id = $1
+                     )
+                       AND registrar.school_id = $2
+                     ORDER BY grade_report.submitted_at DESC
+                     LIMIT $3`,
+                    [result.rows[0].application_id, req.auth.scopeId, MAX_QUEUE_SIZE]
+                );
+                const eligibilityChecks = await pool.query(
+                    `SELECT eligibility.check_type, eligibility.result,
+                            eligibility.remarks, eligibility.reviewed_at
+                     FROM "Eligibility_Checks" eligibility
+                     JOIN "Registrars" registrar
+                       ON registrar.registrar_id = eligibility.registrar_id
+                     WHERE eligibility.student_id = (
+                         SELECT application.student_id
+                         FROM "Applications" application
+                         WHERE application.application_id = $1
+                     )
+                       AND registrar.school_id = $2
+                     ORDER BY eligibility.reviewed_at DESC
+                     LIMIT $3`,
+                    [result.rows[0].application_id, req.auth.scopeId, MAX_QUEUE_SIZE]
+                );
+                response.academicRecords = {
+                    gradeReports: academicRecords.rows,
+                    eligibilityChecks: eligibilityChecks.rows
+                };
+            }
+            return res.json(response);
         });
     }
 
@@ -968,6 +1713,331 @@ function createApp({
 }
 
 module.exports = {
+        if (role !== "LGU Admin") {
+            app.get(`${path.replace("/verifications", "")}/dashboard`,
+                ...roleMiddleware,
+                async (req, res) => {
+                    if (!await requireStaffSchema(res)) return;
+                    const result = await pool.query(
+                        `SELECT COUNT(*) FILTER (
+                                    WHERE verification.status = 'pending'
+                                )::INTEGER AS pending_count,
+                                COUNT(*) FILTER (
+                                    WHERE verification.status = 'needs_information'
+                                )::INTEGER AS needs_information_count
+                         FROM "Application_Verifications" verification
+                         JOIN "Applications" application
+                           ON application.application_id = verification.application_id
+                         JOIN "Students" student
+                           ON student.student_id = application.student_id
+                         JOIN "Funding_Programs" program
+                           ON program.program_id = application.program_id
+                         WHERE verification.verification_type = $1
+                           AND verification.status IN ('pending', 'needs_information')
+                           AND ${scopeColumn} = $2`,
+                        [verificationType, req.auth.scopeId]
+                    );
+                    return res.json({ summary: result.rows[0] });
+                }
+            );
+        }
+
     createApp,
+            if (!await requireStaffSchema(res, { admin: role === "LGU Admin" })) return;
     SESSION_COOKIE
 };
+        app.patch(
+            `${path}/:verificationId`,
+            ...roleMiddleware,
+            async (req, res, next) => {
+                const isAdmin = role === "LGU Admin";
+                if (!await requireStaffSchema(res, { admin: isAdmin })) return;
+                const verificationId = parsePositiveId(
+                    req.params.verificationId,
+                    "Verification ID",
+                    res
+                );
+                if (!verificationId) return;
+                const input = (isAdmin
+                    ? applicationDecisionSchema
+                    : verificationDecisionSchema).safeParse(req.body);
+                if (!input.success) {
+                    return res.status(400).json({
+                        message: "Verification decision is invalid.",
+                        errors: input.error.issues.map(({ path, message }) => ({
+                            field: path.join("."),
+                            message
+                        }))
+                    });
+                }
+
+                const expectedApplicationStatus = {
+                    barangay: "barangay_verification",
+                    registrar: "registrar_verification",
+                    lgu: "lgu_review"
+                }[verificationType];
+                const client = await pool.connect();
+                try {
+                    await client.query("BEGIN");
+                    const current = await client.query(
+                        `SELECT verification.verification_id,
+                                verification.application_id, verification.status,
+                                application.application_status,
+                                application.program_id
+                         FROM "Application_Verifications" verification
+                         JOIN "Applications" application
+                           ON application.application_id = verification.application_id
+                         JOIN "Students" student
+                           ON student.student_id = application.student_id
+                         JOIN "Funding_Programs" program
+                           ON program.program_id = application.program_id
+                         WHERE verification.verification_id = $1
+                           AND verification.verification_type = $2
+                           AND ${scopeColumn} = $3
+                         FOR UPDATE OF verification, application`,
+                        [verificationId, verificationType, req.auth.scopeId]
+                    );
+                    if (current.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(404).json({
+                            message: "Verification task not found."
+                        });
+                    }
+                    const task = current.rows[0];
+                    if (
+                        task.application_status !== expectedApplicationStatus ||
+                        !["pending", "needs_information"].includes(task.status) ||
+                        task.status === input.data.status
+                    ) {
+                        await client.query("ROLLBACK");
+                        return res.status(409).json({
+                            message: "This verification is not in a state that allows the requested decision."
+                        });
+                    }
+                    const updated = await client.query(
+                        `UPDATE "Application_Verifications"
+                         SET status = $1,
+                             remarks = $2,
+                             reviewed_by = $3,
+                             reviewed_at = CASE
+                                 WHEN $1 IN ('approved', 'rejected') THEN NOW()
+                                 ELSE NULL
+                             END
+                         WHERE verification_id = $4
+                         RETURNING verification_id, application_id,
+                                   verification_type, status, remarks,
+                                   reviewed_at`,
+                        [
+                            input.data.status,
+                            input.data.remarks || null,
+                            req.auth.userId,
+                            verificationId
+                        ]
+                    );
+                    let award = null;
+                    if (isAdmin && input.data.status === "approved") {
+                        const insertedAward = await client.query(
+                            `INSERT INTO "Scholarship_Awards" (
+                                application_id, program_id, award_amount,
+                                award_status, award_date
+                             ) VALUES ($1, $2, $3, 'pending', CURRENT_DATE)
+                             RETURNING award_id, award_amount`,
+                            [
+                                task.application_id,
+                                task.program_id,
+                                input.data.awardAmount
+                            ]
+                        );
+                        await client.query(
+                            "SELECT approve_award($1, $2)",
+                            [insertedAward.rows[0].award_id, req.auth.userId]
+                        );
+                        award = {
+                            award_id: insertedAward.rows[0].award_id,
+                            award_amount: insertedAward.rows[0].award_amount,
+                            award_status: "approved"
+                        };
+                    }
+                    await client.query(
+                        `INSERT INTO "Audit_Logs" (
+                            user_id, action_type, entity_type, entity_id, details
+                         ) VALUES ($1, $2, 'Application_Verifications', $3,
+                                   jsonb_build_object(
+                                       'verification_type', $4,
+                                       'status', $5
+                                   ))`,
+                        [
+                            req.auth.userId,
+                            isAdmin ? "lgu_application_reviewed" : "staff_verification_recorded",
+                            verificationId,
+                            verificationType,
+                            input.data.status
+                        ]
+                    );
+                    await client.query("COMMIT");
+                    return res.json({ verification: updated.rows[0], award });
+                } catch (error) {
+                    try {
+                        await client.query("ROLLBACK");
+                    } catch (rollbackError) {
+                        logger.error("Verification decision rollback failed", {
+                            code: rollbackError.code
+                        });
+                    }
+                    if (isAdmin && ["P0001", "23505", "23514"].includes(error.code)) {
+                        return res.status(409).json({
+                            message: "The award could not be approved because workflow, eligibility, duplicate-funding, or budget requirements were not met."
+                        });
+                    }
+                    if (["P0001", "23514"].includes(error.code)) {
+                        return res.status(409).json({
+                            message: "The requested verification status transition is not allowed."
+                        });
+                    }
+                    return next(error);
+                } finally {
+                    client.release();
+                }
+            }
+        );
+
+        if (role === "Registrar") {
+            const registrarBase = path.replace("/verifications", "");
+            const academicRecordRoutes = [
+                {
+                    path: `${registrarBase}/applications/:applicationId/grade-reports`,
+                    schema: gradeReportSchema,
+                    insertSql: `INSERT INTO "Grade_Reports" (
+                                    student_id, registrar_id, school_year,
+                                    semester, gpa, remarks
+                                ) VALUES ($1, $2, $3, $4, $5, $6)
+                                RETURNING grade_report_id, school_year,
+                                          semester, gpa, remarks, submitted_at`,
+                    values(data, assignment) {
+                        return [
+                            assignment.student_id,
+                            assignment.registrar_id,
+                            data.schoolYear,
+                            data.semester,
+                            data.gpa,
+                            data.remarks || null
+                        ];
+                    },
+                    responseKey: "gradeReport",
+                    auditAction: "registrar_grade_report_recorded"
+                },
+                {
+                    path: `${registrarBase}/applications/:applicationId/eligibility-checks`,
+                    schema: eligibilityCheckSchema,
+                    insertSql: `INSERT INTO "Eligibility_Checks" (
+                                    student_id, registrar_id, check_type,
+                                    result, remarks
+                                ) VALUES ($1, $2, $3, $4, $5)
+                                RETURNING eligibility_id, check_type,
+                                          result, remarks, reviewed_at`,
+                    values(data, assignment) {
+                        return [
+                            assignment.student_id,
+                            assignment.registrar_id,
+                            data.checkType,
+                            data.result,
+                            data.remarks || null
+                        ];
+                    },
+                    responseKey: "eligibilityCheck",
+                    auditAction: "registrar_eligibility_check_recorded"
+                }
+            ];
+
+            for (const recordRoute of academicRecordRoutes) {
+                app.post(
+                    recordRoute.path,
+                    ...roleMiddleware,
+                    async (req, res, next) => {
+                        if (!await requireStaffSchema(res)) return;
+                        const applicationId = parsePositiveId(
+                            req.params.applicationId,
+                            "Application ID",
+                            res
+                        );
+                        if (!applicationId) return;
+                        const input = recordRoute.schema.safeParse(req.body);
+                        if (!input.success) {
+                            return res.status(400).json({
+                                message: "Academic verification details are invalid.",
+                                errors: input.error.issues.map(({ path, message }) => ({
+                                    field: path.join("."),
+                                    message
+                                }))
+                            });
+                        }
+
+                        const client = await pool.connect();
+                        try {
+                            await client.query("BEGIN");
+                            const assignment = await client.query(
+                                `SELECT application.application_id,
+                                        student.student_id, registrar.registrar_id
+                                 FROM "Applications" application
+                                 JOIN "Students" student
+                                   ON student.student_id = application.student_id
+                                 JOIN "Registrars" registrar
+                                   ON registrar.user_id = $2
+                                  AND registrar.school_id = student.school_id
+                                  AND registrar.is_active = TRUE
+                                 WHERE application.application_id = $1
+                                   AND application.application_status =
+                                       'registrar_verification'
+                                   AND student.is_active = TRUE
+                                   AND registrar.school_id = $3
+                                 FOR UPDATE OF application, student, registrar`,
+                                [applicationId, req.auth.userId, req.auth.scopeId]
+                            );
+                            if (assignment.rowCount === 0) {
+                                await client.query("ROLLBACK");
+                                return res.status(404).json({
+                                    message: "Application not found in your school's active verification queue."
+                                });
+                            }
+                            const result = await client.query(
+                                recordRoute.insertSql,
+                                recordRoute.values(input.data, assignment.rows[0])
+                            );
+                            await client.query(
+                                `INSERT INTO "Audit_Logs" (
+                                    user_id, action_type, entity_type, entity_id, details
+                                 ) VALUES ($1, $2, $3, $4,
+                                           jsonb_build_object(
+                                               'application_id', $5,
+                                               'school_id', $6
+                                           ))`,
+                                [
+                                    req.auth.userId,
+                                    recordRoute.auditAction,
+                                    recordRoute.responseKey,
+                                    result.rows[0].grade_report_id ||
+                                        result.rows[0].eligibility_id,
+                                    applicationId,
+                                    req.auth.scopeId
+                                ]
+                            );
+                            await client.query("COMMIT");
+                            return res.status(201).json({
+                                [recordRoute.responseKey]: result.rows[0]
+                            });
+                        } catch (error) {
+                            try {
+                                await client.query("ROLLBACK");
+                            } catch (rollbackError) {
+                                logger.error("Academic record rollback failed", {
+                                    code: rollbackError.code
+                                });
+                            }
+                            return next(error);
+                        } finally {
+                            client.release();
+                        }
+                    }
+                );
+            }
+        }

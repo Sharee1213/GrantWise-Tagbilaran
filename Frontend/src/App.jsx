@@ -8,7 +8,7 @@ import SignUpPage from "./pages/SignUpPage.jsx";
 import StatusPage from "./pages/StatusPage.jsx";
 import ProgramsPage from "./pages/ProgramsPage.jsx";
 import PortalDirectoryPage from "./pages/PortalDirectoryPage.jsx";
-import PortalPlaceholderPage from "./pages/PortalPlaceholderPage.jsx";
+import StaffPortalPage from "./pages/StaffPortalPage.jsx";
 import StudentPortalPage from "./pages/StudentPortalPage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
 
@@ -23,7 +23,7 @@ export default function App() {
         <Route path="/signup" element={<SignUpPage />} />
         <Route path="/portals" element={<PortalDirectoryPage />} />
         <Route path="/portal/student" element={<StudentPortalPage />} />
-        <Route path="/portal/:portalType" element={<PortalPlaceholderPage />} />
+        <Route path="/portal/:portalType" element={<StaffPortalPage />} />
         <Route path="/status" element={<StatusPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

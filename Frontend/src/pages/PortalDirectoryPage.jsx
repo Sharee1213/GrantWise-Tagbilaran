@@ -50,7 +50,7 @@ export default function PortalDirectoryPage() {
       <PageHeading
         eyebrow="GRANTWISE PORTALS"
         title="A place for every role."
-        description="The student portal supports applications and status tracking. Staff portal links remain previews and do not grant access."
+        description="Each portal uses the signed-in account's server-verified role and active organizational assignment."
       />
 
       <div className="portal-grid">
@@ -63,7 +63,7 @@ export default function PortalDirectoryPage() {
             <h2>{title}</h2>
             <p>{description}</p>
             <Link className="text-link" to={`/portal/${path}`}>
-              {path === "student" ? "Open student portal" : "View placeholder"}
+              {path === "student" ? "Open student portal" : "Open staff portal"}
               <ArrowRight size={16} aria-hidden="true" />
             </Link>
           </article>
@@ -71,11 +71,11 @@ export default function PortalDirectoryPage() {
       </div>
 
       <div className="access-principle">
-        <strong>Staff access is not granted by these previews.</strong>
+        <strong>Staff data stays within the assigned organization.</strong>
         <p>
-          Funding-unit, barangay, and school access remains enforced by
-          authenticated backend APIs. The student portal also checks the
-          server-authenticated role before showing personal application data.
+          Staff endpoints derive funding-unit, barangay, and school scope from
+          the authenticated database assignment. The portal directory does not
+          grant access; each backend request checks the current session and role.
         </p>
       </div>
     </div>

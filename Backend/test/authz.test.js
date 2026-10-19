@@ -128,6 +128,8 @@ class FakePool {
 
     async query(query, values = []) {
         const sql = query.replace(/\s+/g, " ").trim();
+        this.queries ||= [];
+        this.queries.push(sql);
 
         if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
             return { rowCount: 0, rows: [] };
@@ -142,7 +144,11 @@ class FakePool {
                 rows: [{
                     relational_program_schema: relationalSchema,
                     application_workflow_schema: workflowSchema,
-                    has_verification_table: workflowSchema
+                    has_verification_table: workflowSchema,
+                    has_admin_funding_unit_assignment: relationalSchema,
+                    has_program_budget_balances: relationalSchema,
+                    has_award_approval_function: relationalSchema,
+                    has_staff_admin_workflow: relationalSchema
                 }]
             };
         }
@@ -380,6 +386,14 @@ class FakePool {
             return { rowCount: 0, rows: [] };
         }
 
+        if (sql.includes('FROM "Grade_Reports" grade_report')) {
+            return { rowCount: 0, rows: [] };
+        }
+
+        if (sql.includes('FROM "Eligibility_Checks" eligibility')) {
+            return { rowCount: 0, rows: [] };
+        }
+
         if (sql.includes('SELECT document.document_id')) {
             return { rowCount: 0, rows: [] };
         }
@@ -448,6 +462,224 @@ class FakePool {
         }
 
         throw new Error(`Unexpected test query: ${sql}`);
+    }
+}
+
+class StaffPortalPool extends FakePool {
+    async query(query, values = []) {
+        const sql = query.replace(/\s+/g, " ").trim();
+        this.queries ||= [];
+        this.queries.push(sql);
+
+        if (sql.startsWith("SELECT COUNT(*)::INTEGER AS program_count")) {
+            this.lastDashboardScope = values[0];
+            return {
+                rowCount: 1,
+                rows: [{
+                    program_count: 2,
+                    application_count: 3,
+                    in_review_count: 1,
+                    total_budget: "5000.00",
+                    remaining_budget: "3000.00",
+                    reserved_budget: "1000.00",
+                    released_budget: "1000.00"
+                }]
+            };
+        }
+        if (sql.includes("AS pending_count")) {
+            this.lastQueueScope = values[1];
+            return {
+                rowCount: 1,
+                rows: [{
+                    pending_count: 2,
+                    needs_information_count: 1
+                }]
+            };
+        }
+        if (
+            sql.includes('FROM "Funding_Programs" program') &&
+            sql.includes("program.program_id = $1") &&
+            sql.includes("program.funding_unit_id = $2")
+        ) {
+            const authorized = Number(values[1]) === 41 && Number(values[0]) === 701;
+            return {
+                rowCount: authorized ? 1 : 0,
+                rows: authorized ? [{ program_id: 701 }] : []
+            };
+        }
+        if (
+            sql.includes('FROM "Funding_Programs" program') &&
+            sql.includes('JOIN "Funding_Cycles" cycle') &&
+            sql.includes("WHERE program.funding_unit_id = $1")
+        ) {
+            this.lastProgramListScope = values[0];
+            return {
+                rowCount: 1,
+                rows: Number(values[0]) === 41
+                    ? [{ program_id: 701, program_name: "Unit A Grant" }]
+                    : []
+            };
+        }
+        if (sql.startsWith('SELECT funding_cycle_id FROM "Funding_Cycles"')) {
+            return {
+                    rowCount: Number(values[0]) === 901 ? 1 : 0,
+                    rows: Number(values[0]) === 901 ? [{ funding_cycle_id: 901 }] : []
+            };
+        }
+        if (sql.startsWith('SELECT program_id FROM "Funding_Programs"')) {
+            const authorized = Number(values[0]) === 701 && Number(values[1]) === 41;
+            return {
+                rowCount: authorized ? 1 : 0,
+                rows: authorized ? [{ program_id: 701 }] : []
+            };
+        }
+        if (sql.startsWith('SELECT allocation_id FROM "Program_Barangay_Allocations"')) {
+            return { rowCount: 0, rows: [] };
+        }
+        if (sql.startsWith('SELECT program_id, total_budget FROM "Funding_Programs"')) {
+            return {
+                rowCount: 1,
+                rows: [{ program_id: 701, total_budget: "1000.00" }]
+            };
+        }
+        if (sql.startsWith('SELECT barangay_id FROM "Barangays"')) {
+            return {
+                rowCount: values[0].length,
+                rows: values[0].map((barangay_id) => ({ barangay_id }))
+            };
+        }
+        if (sql.startsWith('DELETE FROM "Program_Barangay_Allocations"')) {
+            return { rowCount: 0, rows: [] };
+        }
+        if (sql.startsWith('INSERT INTO "Program_Barangay_Allocations"')) {
+            (this.savedAllocationValues ||= []).push(values);
+            return { rowCount: 1, rows: [] };
+        }
+        if (sql.startsWith('SELECT allocation.barangay_id, barangay.barangay_name')) {
+            return {
+                rowCount: this.savedAllocationValues?.length || 0,
+                rows: (this.savedAllocationValues || []).map((allocation) => ({
+                    barangay_id: allocation[1],
+                    barangay_name: `Barangay ${allocation[1]}`,
+                    allocated_amount: allocation[2]
+                }))
+            };
+        }
+        if (sql.startsWith('INSERT INTO "Funding_Programs"')) {
+            this.createdProgramValues = values;
+            return {
+                    rowCount: 1,
+                    rows: [{
+                        program_id: 702,
+                        program_name: values[0],
+                        funding_cycle_id: values[2],
+                        total_budget: values[3],
+                        remaining_budget: values[3],
+                        status: "active"
+                    }]
+            };
+        }
+        if (sql.startsWith("WITH updated_program AS ( UPDATE \"Funding_Programs\"")) {
+            this.updatedProgramValues = values;
+            const authorized =
+                    Number(values[0]) === 701 && Number(values[1]) === 41;
+            return {
+                    rowCount: authorized ? 1 : 0,
+                    rows: authorized ? [{ program_id: 701, status: values[3] }] : []
+            };
+        }
+        if (sql.includes("FOR UPDATE OF verification, application")) {
+            const verificationId = Number(values[0]);
+            const type = values[1];
+            const scopeId = Number(values[2]);
+            const task = verificationScopes.get(verificationId);
+            const authorized =
+                task?.type === type &&
+                task.scopeId === scopeId &&
+                !this.missingWorkflowTask;
+            return {
+                rowCount: authorized ? 1 : 0,
+                rows: authorized
+                    ? [{
+                        verification_id: verificationId,
+                        application_id: 9001 + verificationId,
+                        status: this.verificationStatus || "pending",
+                        application_status: {
+                            barangay: "barangay_verification",
+                            registrar: "registrar_verification",
+                            lgu: "lgu_review"
+                        }[type],
+                        program_id: 701
+                    }]
+                    : []
+            };
+        }
+        if (sql.startsWith('UPDATE "Application_Verifications"')) {
+            this.updatedVerification = {
+                verification_id: values[3],
+                status: values[0],
+                reviewed_by: values[2]
+            };
+            return { rowCount: 1, rows: [this.updatedVerification] };
+        }
+        if (sql.startsWith('INSERT INTO "Scholarship_Awards"')) {
+            this.insertedAward = {
+                award_id: 8001,
+                award_amount: values[2]
+            };
+            return { rowCount: 1, rows: [this.insertedAward] };
+        }
+        if (sql === "SELECT approve_award($1, $2)") {
+            if (this.awardFailure) {
+                throw Object.assign(new Error("private funding failure"), {
+                    code: "P0001"
+                });
+            }
+            this.approvedAwardValues = values;
+            return { rowCount: 1, rows: [{}] };
+        }
+        if (sql.startsWith('INSERT INTO "Audit_Logs"')) {
+            return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes("FOR UPDATE OF application, student, registrar")) {
+            const [applicationId, userId, schoolId] = values.map(Number);
+            const registrarOwnsApplication =
+                userId === fixtureUsers.registrarA.user_id &&
+                schoolId === fixtureUsers.registrarA.registrar_school_id &&
+                applicationId === 5001;
+            return {
+                rowCount: registrarOwnsApplication ? 1 : 0,
+                rows: registrarOwnsApplication
+                    ? [{ application_id: applicationId, student_id: 101, registrar_id: 401 }]
+                    : []
+            };
+        }
+        if (sql.startsWith('INSERT INTO "Grade_Reports"')) {
+            this.gradeReportValues = values;
+            return {
+                rowCount: 1,
+                rows: [{
+                    grade_report_id: 31,
+                    school_year: values[2],
+                    semester: values[3],
+                    gpa: values[4],
+                    remarks: values[5]
+                }]
+            };
+        }
+        if (sql.startsWith('INSERT INTO "Eligibility_Checks"')) {
+            this.eligibilityValues = values;
+            return {
+                rowCount: 1,
+                rows: [{
+                    eligibility_id: 32,
+                    check_type: values[2],
+                    result: values[3],
+                    remarks: values[4]
+                }]
+            };
+        }
+        return super.query(query, values);
     }
 }
 
@@ -810,6 +1042,281 @@ test("all staff roles can access only their assigned verification scope", async 
         ).send({ scopeId: 999, role: staff.role });
         assert.equal(otherDetail.status, 404, `${staff.role} cross-scope detail`);
     }
+});
+
+function staffTestApp(pool) {
+    return createApp({
+        pool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error: (...args) => (pool.errors ||= []).push(args) }
+    });
+}
+
+test("staff dashboards require a session and the matching server-side role", async () => {
+    const dashboardApp = staffTestApp(new StaffPortalPool());
+
+    assert.equal(
+        (await request(dashboardApp).get("/api/admin/dashboard")).status,
+        401
+    );
+    assert.equal(
+        (await request(dashboardApp)
+            .get("/api/admin/dashboard")
+            .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+            .send({ role: "LGU Admin", fundingUnitId: 41 })).status,
+        403
+    );
+
+    const coordinator = await request(dashboardApp)
+        .get("/api/coordinator/dashboard?barangayId=8")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`)
+        .send({ barangayId: 8 });
+    assert.equal(coordinator.status, 200, JSON.stringify(dashboardApp.locals));
+    assert.equal(coordinator.body.summary.pending_count, 2, JSON.stringify(coordinator.body));
+});
+
+test("LGU summaries and program details are restricted to the assigned funding unit", async () => {
+    const pool = new StaffPortalPool();
+    const adminApp = staffTestApp(pool);
+
+    const dashboard = await request(adminApp)
+        .get("/api/admin/dashboard?fundingUnitId=42")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`);
+    assert.equal(dashboard.status, 200, JSON.stringify({
+        body: dashboard.body,
+        errors: pool.errors || [],
+        queries: pool.queries
+    }));
+    assert.equal(pool.lastDashboardScope, 41);
+    assert.equal(dashboard.body.summary.total_budget, "5000.00");
+
+    const programs = await request(adminApp)
+        .get("/api/admin/programs?fundingUnitId=42&limit=200")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`);
+    assert.equal(programs.status, 400);
+
+    const ownProgram = await request(adminApp)
+        .get("/api/admin/programs/701")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`);
+    assert.equal(ownProgram.status, 200);
+    const otherUnitProgram = await request(adminApp)
+        .get("/api/admin/programs/999")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`);
+    assert.equal(otherUnitProgram.status, 404);
+});
+
+test("LGU administrators can create and update permitted program fields only in their unit", async () => {
+    const pool = new StaffPortalPool();
+    const adminApp = staffTestApp(pool);
+    const programRequest = (method, path, body) =>
+        request(adminApp)
+            [method](path)
+            .set("Origin", FRONTEND_ORIGIN)
+            .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+            .send(body);
+
+    const invalid = await programRequest("post", "/api/admin/programs", {
+        programName: "Test Grant",
+        fundingCycleId: 901,
+        totalBudget: 100,
+        fundingUnitId: 42
+    });
+    assert.equal(invalid.status, 400);
+
+    const created = await programRequest("post", "/api/admin/programs", {
+        programName: "Test Grant",
+        fundingCycleId: 901,
+        totalBudget: 100,
+        startDate: "2026-01-01",
+        endDate: "2026-12-31"
+    });
+    assert.equal(created.status, 201);
+    assert.equal(pool.createdProgramValues[1], fixtureUsers.adminA.funding_unit_id);
+    assert.equal(pool.createdProgramValues[2], 901);
+    assert.equal(pool.createdProgramValues[3], 100);
+
+    const updated = await programRequest(
+        "patch",
+        "/api/admin/programs/701",
+        { status: "inactive" }
+    );
+    assert.equal(updated.status, 200);
+    assert.equal(pool.updatedProgramValues[0], 701);
+    assert.equal(pool.updatedProgramValues[1], fixtureUsers.adminA.funding_unit_id);
+
+    const crossUnit = await programRequest(
+        "patch",
+        "/api/admin/programs/999",
+        { status: "inactive" }
+    );
+    assert.equal(crossUnit.status, 404);
+});
+
+test("LGU administrators can replace barangay allocations within the program budget", async () => {
+    const pool = new StaffPortalPool();
+    const adminApp = staffTestApp(pool);
+    const updateAllocations = (programId, allocations) =>
+        request(adminApp)
+            .put(`/api/admin/programs/${programId}/barangay-allocations`)
+            .set("Origin", FRONTEND_ORIGIN)
+            .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+            .send({ allocations });
+
+    const duplicateBarangay = await updateAllocations(701, [
+        { barangayId: 1, allocatedAmount: 100 },
+        { barangayId: 1, allocatedAmount: 200 }
+    ]);
+    assert.equal(duplicateBarangay.status, 400);
+
+    const overBudget = await updateAllocations(701, [
+        { barangayId: 1, allocatedAmount: 600 },
+        { barangayId: 2, allocatedAmount: 500 }
+    ]);
+    assert.equal(overBudget.status, 400);
+    assert.equal(pool.savedAllocationValues, undefined);
+
+    const saved = await updateAllocations(701, [
+        { barangayId: 1, allocatedAmount: 600 },
+        { barangayId: 2, allocatedAmount: 400 }
+    ]);
+    assert.equal(saved.status, 200);
+    assert.equal(pool.savedAllocationValues.length, 2);
+    assert.deepEqual(pool.savedAllocationValues.map((row) => row[0]), [701, 701]);
+
+    const crossUnit = await updateAllocations(999, [
+        { barangayId: 1, allocatedAmount: 10 }
+    ]);
+    assert.equal(crossUnit.status, 404);
+});
+
+test("staff verification actions reject invalid and cross-scope requests", async () => {
+    const pool = new StaffPortalPool();
+    const coordinatorApp = staffTestApp(pool);
+
+    const invalid = await request(coordinatorApp)
+        .patch("/api/coordinator/verifications/601")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`)
+        .send({ status: "approved", reviewedBy: 999 });
+    assert.equal(invalid.status, 400);
+
+    const crossScope = await request(coordinatorApp)
+        .patch("/api/coordinator/verifications/602")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`)
+        .send({ status: "approved", remarks: "checked" });
+    assert.equal(crossScope.status, 404);
+
+    pool.verificationStatus = "approved";
+    const invalidTransition = await request(coordinatorApp)
+        .patch("/api/coordinator/verifications/601")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`)
+        .send({ status: "rejected" });
+    assert.equal(invalidTransition.status, 409);
+});
+
+test("coordinators can record a scoped verification decision", async () => {
+    const pool = new StaffPortalPool();
+    const coordinatorApp = staffTestApp(pool);
+    const response = await request(coordinatorApp)
+        .patch("/api/coordinator/verifications/601")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`)
+        .send({ status: "approved", remarks: "Residency confirmed." });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.verification.status, "approved");
+    assert.equal(pool.updatedVerification.reviewed_by, fixtureUsers.coordinatorA.user_id);
+});
+
+test("registrars can add only schema-supported academic records for their school queue", async () => {
+    const pool = new StaffPortalPool();
+    const registrarApp = staffTestApp(pool);
+    const ownSchool = await request(registrarApp)
+        .post("/api/registrar/applications/5001/grade-reports")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.registrarA}`)
+        .send({
+            schoolYear: "2026-2027",
+            semester: "First",
+            gpa: 3.5,
+            remarks: "Verified against school record."
+        });
+    assert.equal(ownSchool.status, 201);
+    assert.equal(pool.gradeReportValues[0], 101);
+    assert.equal(pool.gradeReportValues[1], 401);
+
+    const otherSchool = await request(registrarApp)
+        .post("/api/registrar/applications/5002/eligibility-checks")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.registrarA}`)
+        .send({ checkType: "enrollment", result: "eligible" });
+    assert.equal(otherSchool.status, 404);
+    assert.equal(pool.eligibilityValues, undefined);
+
+    const unsupportedField = await request(registrarApp)
+        .post("/api/registrar/applications/5001/eligibility-checks")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.registrarA}`)
+        .send({ checkType: "attendance", result: "eligible", attendance: 100 });
+    assert.equal(unsupportedField.status, 400);
+});
+
+test("LGU award approval requires valid input and delegates funding checks to the transaction", async () => {
+    const pool = new StaffPortalPool();
+    const adminApp = staffTestApp(pool);
+    const patchApproval = (body, verificationId = 621) =>
+        request(adminApp)
+            .patch(`/api/admin/verifications/${verificationId}`)
+            .set("Origin", FRONTEND_ORIGIN)
+            .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+            .send(body);
+
+    assert.equal((await patchApproval({ status: "approved" })).status, 400);
+    assert.equal((await patchApproval({
+        status: "approved",
+        awardAmount: 100
+    }, 622)).status, 404);
+
+    const approved = await patchApproval({
+        status: "approved",
+        awardAmount: 250.25,
+        remarks: "Funding checks complete."
+    });
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.award.award_status, "approved");
+    assert.deepEqual(pool.approvedAwardValues, [8001, fixtureUsers.adminA.user_id]);
+
+    const insufficientFundingPool = new StaffPortalPool();
+    insufficientFundingPool.awardFailure = true;
+    const insufficientFundingApp = staffTestApp(insufficientFundingPool);
+    const blocked = await request(insufficientFundingApp)
+        .patch("/api/admin/verifications/621")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({ status: "approved", awardAmount: 250 });
+    assert.equal(blocked.status, 409);
+    assert.equal(
+        blocked.body.message.includes("private funding failure"),
+        false
+    );
+});
+
+test("staff dashboards remain disabled when required workflow objects are absent", async () => {
+    const legacyPool = new FakePool();
+    legacyPool.legacyProgramSchema = true;
+    const legacyApp = staffTestApp(legacyPool);
+    const response = await request(legacyApp)
+        .get("/api/coordinator/verifications")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.coordinatorA}`);
+    assert.equal(response.status, 503);
+    assert.equal(legacyPool.connectCount || 0, 0);
+
+    const admin = await request(legacyApp)
+        .get("/api/admin/dashboard")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`);
+    assert.equal(admin.status, 503);
 });
 
 test("authenticated students cannot switch roles through request data", async () => {
