@@ -1,8 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { ArrowRight, Check, FileText, Info, School } from "lucide-react";
 import { Link } from "react-router-dom";
-import FeatureUnavailable from "../components/FeatureUnavailable.jsx";
 import PageHeading from "../components/PageHeading.jsx";
+import { apiRequest } from "../services/api.js";
 
 const preparationItems = [
   "Read the official notice for the specific scholarship or grant.",
@@ -12,12 +12,41 @@ const preparationItems = [
 ];
 
 export default function ApplicationGuidePage() {
+  const [submissionState, setSubmissionState] = useState({
+    status: "loading",
+    message: "",
+  });
+
+  useEffect(() => {
+    let active = true;
+    apiRequest("programs")
+      .then((data) => {
+        if (active) {
+          setSubmissionState({
+            status: data.applicationSubmissionEnabled ? "available" : "unavailable",
+            message: "",
+          });
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setSubmissionState({
+            status: "error",
+            message: error.message || "Could not check application availability.",
+          });
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="page-container information-page">
       <PageHeading
         eyebrow="APPLICATION INSTRUCTIONS"
         title="Prepare with confidence."
-        description="Use the current official program notice as the source of truth. This guide is informational only; online applications and document uploads are not available in GrantWise yet."
+        description="Use the current official program notice as the source of truth. Application availability depends on an open program and a ready submission workflow."
       />
 
       <div className="guide-callout">
@@ -57,18 +86,27 @@ export default function ApplicationGuidePage() {
         </aside>
       </section>
 
-      <FeatureUnavailable
-        title="Online submission is not connected."
-        description="The backend does not yet provide registration, login, application creation, document-upload, or application-status endpoints. Do not send personal documents through this preview."
-      />
+      <div className="guide-callout">
+        <Info size={20} aria-hidden="true" />
+        <p>
+          {submissionState.status === "loading"
+            ? "Checking whether online submission is available..."
+            : submissionState.status === "available"
+              ? "Online submission is available for programs marked open. GrantWise does not support document uploads or store program-specific eligibility rules."
+              : submissionState.status === "error"
+                ? `Could not check online submission availability. ${submissionState.message}`
+                : "Online submission is unavailable for the currently configured database. No application can be submitted until its required workflow is installed."}{" "}
+          Confirm program requirements with the funding unit.
+        </p>
+      </div>
 
       <div className="page-actions">
         <Link className="button button-primary" to="/programs">
-          Program information
+          View open programs
           <ArrowRight size={16} aria-hidden="true" />
         </Link>
         <Link className="text-link" to="/login">
-          Sign-in availability
+          Student sign in
           <FileText size={15} aria-hidden="true" />
         </Link>
       </div>

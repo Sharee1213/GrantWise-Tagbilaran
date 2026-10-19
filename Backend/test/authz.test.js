@@ -120,6 +120,7 @@ const tokens = {
 
 class FakePool {
     async connect() {
+        this.connectCount = (this.connectCount || 0) + 1;
         return this;
     }
 
@@ -130,6 +131,20 @@ class FakePool {
 
         if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
             return { rowCount: 0, rows: [] };
+        }
+
+        if (sql.startsWith("SELECT ( to_regclass(")) {
+            const relationalSchema = !this.legacyProgramSchema;
+            const workflowSchema =
+                relationalSchema && this.applicationWorkflowReady !== false;
+            return {
+                rowCount: 1,
+                rows: [{
+                    relational_program_schema: relationalSchema,
+                    application_workflow_schema: workflowSchema,
+                    has_verification_table: workflowSchema
+                }]
+            };
         }
 
         if (sql.startsWith("SELECT pg_advisory_xact_lock")) {
@@ -150,6 +165,92 @@ class FakePool {
                 return { rowCount: 1, rows: [{}] };
             }
             return { rowCount: 0, rows: [{}] };
+        }
+
+        if (sql.startsWith("SELECT program.program_id, program.program_name,")) {
+            return {
+                rowCount: 1,
+                rows: [{
+                    program_id: 701,
+                    program_name: "Fixture Grant",
+                    application_start_date: "2026-01-01",
+                    application_end_date: "2026-12-31",
+                    cycle_code: "2026-2027",
+                    cycle_start_date: "2026-01-01",
+                    cycle_end_date: "2026-12-31",
+                    funding_unit_name: "Fixture Unit",
+                    availability: "open"
+                }]
+            };
+        }
+
+        if (sql.startsWith('SELECT program_id, program_name, funding_cycle AS cycle_code')) {
+            return {
+                rowCount: 1,
+                rows: [{
+                    program_id: 702,
+                    program_name: "Legacy Fixture Grant",
+                    cycle_code: "2025-2026",
+                    application_start_date: null,
+                    application_end_date: null,
+                    availability: "open"
+                }]
+            };
+        }
+
+        if (sql.startsWith("SELECT student.student_id, resident.barangay_id")) {
+            const user = Object.values(fixtureUsers).find(
+                (candidate) =>
+                    candidate.user_id === Number(values[0]) &&
+                    candidate.student_id === Number(values[1])
+            );
+            return {
+                rowCount: user ? 1 : 0,
+                rows: user ? [{
+                    student_id: user.student_id,
+                    barangay_id: 7
+                }] : []
+            };
+        }
+
+        if (sql.startsWith('SELECT program.program_id FROM "Funding_Programs"')) {
+            if (this.applicationProgramUnavailable) {
+                return { rowCount: 0, rows: [] };
+            }
+            return { rowCount: 1, rows: [{ program_id: Number(values[0]) }] };
+        }
+
+        if (sql.startsWith('SELECT application_id FROM "Applications"')) {
+            return this.existingApplication
+                ? { rowCount: 1, rows: [{ application_id: 5001 }] }
+                : { rowCount: 0, rows: [] };
+        }
+
+        if (sql.startsWith('INSERT INTO "Applications"')) {
+            this.createdApplicationId = 7001;
+            this.createdApplicationValues = values;
+            return {
+                rowCount: 1,
+                rows: [{ application_id: this.createdApplicationId }]
+            };
+        }
+
+        if (sql.startsWith("UPDATE \"Applications\" SET application_status = 'submitted'")) {
+            this.applicationSubmitted = true;
+            return { rowCount: 1, rows: [] };
+        }
+
+        if (sql.includes(
+            'application.submitted_at FROM "Applications" application WHERE application.application_id = $1'
+        )) {
+            return {
+                rowCount: 1,
+                rows: [{
+                    application_id: this.createdApplicationId,
+                    application_status: "barangay_verification",
+                    submitted_at: "2026-01-01T00:00:00.000Z"
+                }]
+            };
         }
 
         if (sql.startsWith('SELECT barangay_id, barangay_name FROM "Barangays"')) {
@@ -190,7 +291,7 @@ class FakePool {
             return { rowCount: 1, rows: [] };
         }
 
-        if (sql.includes('FROM "Users" WHERE lower(email) = $1')) {
+        if (sql.includes('FROM "Users" u JOIN "Roles"')) {
             const user = Object.values(fixtureUsers).find(
                 (candidate) => candidate.email === values[0]
             );
@@ -203,7 +304,8 @@ class FakePool {
                         last_name: user.last_name,
                         email: user.email,
                         password_hash: loginPasswordHash,
-                        is_active: user.is_active !== false
+                        is_active: user.is_active !== false,
+                        role_name: user.role_name
                     }]
                     : []
             };
@@ -474,6 +576,165 @@ test("authorized student can read their own application", async () => {
     assert.equal(response.body.application.application_id, 5001);
 });
 
+test("public program listings include public schedule and funding-unit fields only", async () => {
+    const response = await request(app).get("/api/programs");
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.programs.length, 1);
+    assert.equal(response.body.programs[0].program_id, 701);
+    assert.equal(response.body.programs[0].availability, "open");
+    assert.equal(response.body.applicationSubmissionEnabled, true);
+    assert.equal("remaining_budget" in response.body.programs[0], false);
+    assert.equal("total_budget" in response.body.programs[0], false);
+});
+
+test("legacy program schema lists real public columns and disables unsupported submission", async () => {
+    const legacyPool = new FakePool();
+    legacyPool.legacyProgramSchema = true;
+    const legacyApp = createApp({
+        pool: legacyPool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    const response = await request(legacyApp).get("/api/programs");
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.programs[0].program_id, 702);
+    assert.equal(response.body.programs[0].cycle_code, "2025-2026");
+    assert.equal("funding_unit_name" in response.body.programs[0], false);
+    assert.equal(response.body.applicationSubmissionEnabled, false);
+
+    const unavailable = await request(legacyApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+        .send({ programId: 702 });
+    assert.equal(unavailable.status, 503);
+    assert.equal(legacyPool.connectCount || 0, 0);
+});
+
+test("legacy student application status reads do not require missing cycle or verification tables", async () => {
+    const legacyApp = createApp({
+        pool: Object.assign(new FakePool(), { legacyProgramSchema: true }),
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    const list = await request(legacyApp)
+        .get("/api/student/applications")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`);
+    assert.equal(list.status, 200);
+    assert.deepEqual(
+        list.body.applications.map(({ application_id }) => application_id),
+        [5001]
+    );
+
+    const detail = await request(legacyApp)
+        .get("/api/student/applications/5001")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.body.application.application_id, 5001);
+    assert.deepEqual(detail.body.verifications, []);
+});
+
+test("program listing returns a generic error when the database query fails", async () => {
+    const errors = [];
+    const brokenPool = {
+        async query() {
+            throw Object.assign(new Error("private database detail"), {
+                code: "ENOTFOUND"
+            });
+        }
+    };
+    const brokenApp = createApp({
+        pool: brokenPool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error: (...args) => errors.push(args) }
+    });
+
+    const response = await request(brokenApp).get("/api/programs");
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, { message: "An internal error occurred." });
+    assert.equal(JSON.stringify(response.body).includes("private database detail"), false);
+    assert.equal(errors.length, 1);
+});
+
+test("student can submit an open application through the database workflow", async () => {
+    const applicationPool = new FakePool();
+    const applicationApp = createApp({
+        pool: applicationPool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    const response = await request(applicationApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+        .send({ programId: 701 });
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(response.body.application, {
+        application_id: 7001,
+        application_status: "barangay_verification",
+        submitted_at: "2026-01-01T00:00:00.000Z"
+    });
+    assert.deepEqual(applicationPool.createdApplicationValues, [101, 701, 7]);
+    assert.equal(applicationPool.applicationSubmitted, true);
+});
+
+test("application submission rejects unauthenticated, invalid, non-student, and duplicate requests", async () => {
+    const applicationApp = createApp({
+        pool: new FakePool(),
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+    const base = request(applicationApp).post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN);
+
+    assert.equal((await base.send({ programId: 701 })).status, 401);
+    assert.equal((await request(applicationApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+        .send({ programId: "701", studentId: 202 })).status, 400);
+    assert.equal((await request(applicationApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.adminA}`)
+        .send({ programId: 701 })).status, 403);
+
+    const duplicatePool = new FakePool();
+    duplicatePool.existingApplication = true;
+    const duplicateApp = createApp({
+        pool: duplicatePool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+    const duplicateResponse = await request(duplicateApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+        .send({ programId: 701 });
+    assert.equal(duplicateResponse.status, 409);
+
+    const unavailablePool = new FakePool();
+    unavailablePool.applicationProgramUnavailable = true;
+    const unavailableApp = createApp({
+        pool: unavailablePool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+    const unavailableResponse = await request(unavailableApp)
+        .post("/api/student/applications")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.studentA}`)
+        .send({ programId: 701 });
+    assert.equal(unavailableResponse.status, 400);
+});
+
 test("student application list excludes other students despite caller-supplied scope", async () => {
     const response = await authenticatedGet(
         "/api/student/applications?userId=22&studentId=202&role=LGU%20Admin",
@@ -567,6 +828,7 @@ test("login issues an HttpOnly session cookie and logout revokes it", async () =
 
     assert.equal(login.status, 200);
     assert.equal(login.body.user.email, "one@example.test");
+    assert.equal(login.body.user.role, "Scholar");
     assert.equal(JSON.stringify(login.body).includes("token"), false);
     const cookie = login.headers["set-cookie"].find((value) =>
         value.startsWith(`${SESSION_COOKIE}=`)

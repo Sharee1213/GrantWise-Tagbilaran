@@ -15,14 +15,12 @@ const programFeatures = [
   {
     icon: Landmark,
     title: "City and partner funding",
-    description:
-      "The database supports multiple funding units. Public program listings are not connected yet.",
+    description: "Browse currently active programs from their respective funding units.",
   },
   {
     icon: CalendarDays,
     title: "Funding-cycle information",
-    description:
-      "Programs can be associated with funding cycles; current openings and dates are not available through the API.",
+    description: "Program listings show their funding-cycle and application dates where recorded.",
   },
   {
     icon: BadgeCheck,
@@ -52,7 +50,7 @@ const applicationSteps = [
     number: "03",
     title: "Submit when applications open",
     description:
-      "The online application portal is not connected yet. This website does not accept applications.",
+      "Submit only when a program is open and the student portal confirms online submission is available.",
   },
 ];
 
@@ -106,9 +104,9 @@ export default function HomePage() {
             <h2 id="program-heading">Support shaped around local needs.</h2>
           </div>
           <p>
-            GrantWise is designed to organize funding programs and their
-            application and review processes. Live program details are not
-            available from the current backend.
+            GrantWise displays active program information from the funding
+            program database. Program-specific eligibility details should be
+            confirmed with the responsible funding unit.
           </p>
         </div>
 
@@ -131,7 +129,7 @@ export default function HomePage() {
             View program information
             <ArrowRight size={16} aria-hidden="true" />
           </Link>
-          <span className="preview-label">Program catalog not connected</span>
+          <span className="preview-label">Live program catalog</span>
         </div>
       </section>
 
@@ -142,8 +140,8 @@ export default function HomePage() {
             A considered process, from preparation to review.
           </h2>
           <p>
-            The online application flow is still being developed. Always follow
-            the official program notice for current requirements and dates.
+            Submit applications to open programs through the student portal.
+            Always follow the official program notice for current requirements.
           </p>
         </div>
         <div className="steps-grid">
@@ -195,15 +193,15 @@ export default function HomePage() {
       <section className="closing-cta" aria-labelledby="cta-heading">
         <div>
           <p className="eyebrow">STAY INFORMED</p>
-          <h2 id="cta-heading">The online application portal is not open yet.</h2>
+          <h2 id="cta-heading">Check your student application status.</h2>
           <p>
-            Sign-in and application submission will be available after the
-            required secure backend services are implemented.
+            Sign in to review your submissions. New applications can be sent
+            only when the student portal confirms submission is available.
           </p>
         </div>
         <div className="closing-actions">
           <Link className="button button-primary" to="/login">
-            Sign-in information
+            Student sign in
             <ArrowRight size={16} aria-hidden="true" />
           </Link>
           <Link className="text-link" to="/portals">

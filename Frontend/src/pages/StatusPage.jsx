@@ -78,9 +78,8 @@ export default function StatusPage() {
       <div className="capability-note">
         <strong>Current integration scope</strong>
         <p>
-          This page checks only the existing API root. A database connectivity
-          test route exists but is not called here. Authentication and
-          application-management endpoints have not been implemented.
+          This page checks only the API root. The program catalog and student
+          application pages make separate database-backed requests.
         </p>
       </div>
     </section>

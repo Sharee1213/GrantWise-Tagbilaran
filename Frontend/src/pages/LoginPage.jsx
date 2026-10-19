@@ -1,22 +1,32 @@
 import React, { useEffect, useState } from "react";
-import { ArrowRight } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
 import { apiRequest } from "../services/api.js";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const programId = searchParams.get("programId");
+
+  function destinationFor(user) {
+    if (user.role !== "Scholar") return "/portals";
+    return programId && /^\d+$/.test(programId)
+      ? `/portal/student?programId=${encodeURIComponent(programId)}`
+      : "/portal/student";
+  }
 
   useEffect(() => {
     let active = true;
     apiRequest("auth/me")
-      .then(() => {
+      .then(({ user }) => {
         if (active) {
-          navigate("/portals", { replace: true });
+          navigate(destinationFor(user), { replace: true });
         }
       })
       .catch((requestError) => {
@@ -27,18 +37,18 @@ export default function LoginPage() {
     return () => {
       active = false;
     };
-  }, [navigate]);
+  }, [navigate, programId]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await apiRequest("auth/login", {
+      const result = await apiRequest("auth/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
       });
-      navigate("/portals");
+      navigate(destinationFor(result.user));
     } catch (requestError) {
       setError(requestError.message || "Login failed.");
     } finally {
@@ -64,14 +74,30 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-        <input
-          className="border p-2 w-full rounded"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+        <div className="relative">
+          <input
+            className="border p-2 pr-12 w-full rounded"
+            type={showPassword ? "text" : "password"}
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+          />
+          <button
+            className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-600"
+            type="button"
+            onClick={() => setShowPassword((visible) => !visible)}
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            aria-pressed={showPassword}
+          >
+            {showPassword ? (
+              <EyeOff size={18} aria-hidden="true" />
+            ) : (
+              <Eye size={18} aria-hidden="true" />
+            )}
+          </button>
+        </div>
         <button className="button button-primary" disabled={loading}>
           {loading ? "Signing in..." : "Sign in"}
           <ArrowRight size={16} aria-hidden="true" />

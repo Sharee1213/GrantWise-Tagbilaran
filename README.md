@@ -14,11 +14,11 @@ PostgreSQL backend.
 | Page | Route | Current state |
 | --- | --- | --- |
 | Public home | `/` | Responsive information site with program overview, general preparation guidance, and eligibility caveats. |
-| Scholarship programs | `/programs` | Clearly marked catalog placeholder; no program-list API exists. |
-| Application instructions | `/application-guide` | General preparation checklist; directs applicants to official notices for current requirements. |
-| Login | `/login` | Authentication-unavailable notice; no credentials are collected. |
-| Portal directory | `/portals` | Links to role previews; it does not grant access. |
-| Student application portal | `/portal/student` | Placeholder pending authentication and student-owned application APIs. |
+| Scholarship programs | `/programs` | Reads active programs from the backend; shows a real empty state when none are available. |
+| Application instructions | `/application-guide` | Preparation checklist; explains that eligibility rules and document uploads are not stored by GrantWise. |
+| Login | `/login` | Authenticates with the backend session cookie. |
+| Portal directory | `/portals` | Opens the student application portal; staff portals remain previews. |
+| Student application portal | `/portal/student` | Authenticated students can submit supported applications and track their own application statuses. |
 | LGU program admin | `/portal/lgu-admin` | Placeholder pending funding-unit-scoped APIs and server-side authorization. |
 | Barangay coordinator | `/portal/barangay-coordinator` | Placeholder pending barangay-scoped APIs and server-side authorization. |
 | School registrar | `/portal/school-registrar` | Placeholder pending school-scoped APIs and server-side authorization. |
@@ -33,22 +33,25 @@ records. The database's seeded roles are `LGU Admin`, `Barangay Coordinator`,
 
 ## Verified backend integration
 
-The frontend currently calls only the API root from **System Status**.
-Authenticated endpoints below are implemented in the backend but are not yet
-connected to the portal previews.
+The frontend uses the public program endpoint, signup/login, and the
+student-owned application and status endpoints below. The System Status page
+checks only the API root.
 
 | Method | Route | Purpose | Frontend use |
 | --- | --- | --- | --- |
 | `GET` | `/` | API availability response | Used by System Status. |
 | `GET` | `/api/test-db` | Database connection test | Not called by the frontend. |
 | `POST` | `/api/init-db` | Runs schema initialization in non-production only | Not called by the frontend. |
-| `POST` | `/api/auth/register` | Development-only: creates a Scholar account and student profile | Not connected. |
-| `POST` | `/api/auth/login` | Verifies password and sets an opaque session cookie | Not connected. |
-| `GET` | `/api/auth/me` | Returns the authenticated user's public identity and role | Not connected. |
-| `POST` | `/api/auth/logout` | Revokes the current session | Not connected. |
+| `GET` | `/api/lookups` | Approved schools and barangays for signup | Signup page. |
+| `GET` | `/api/programs` | Public active program list and application-workflow readiness | Programs page and student portal. |
+| `POST` | `/api/auth/register` | Development-only: creates a Scholar account and student profile | Signup page. |
+| `POST` | `/api/auth/login` | Verifies password and sets an opaque session cookie | Login page. |
+| `GET` | `/api/auth/me` | Returns the authenticated user's public identity and role | Login and student portal. |
+| `POST` | `/api/auth/logout` | Revokes the current session | Backend route; no logout UI yet. |
 | `GET` | `/api/student/profile` | Current student's own profile | Not connected. |
-| `GET` | `/api/student/applications` | Current student's applications | Not connected. |
-| `GET` | `/api/student/applications/:applicationId` | Owned application and verification status history | Not connected. |
+| `GET` | `/api/student/applications` | Current student's applications | Student portal. |
+| `POST` | `/api/student/applications` | Submits an application through the database workflow when required schema is installed | Student portal. |
+| `GET` | `/api/student/applications/:applicationId` | Owned application and verification status history | Student portal. |
 | `GET` | `/api/student/applications/:applicationId/documents` | Owned application document metadata (no file path/content) | Not connected. |
 | `GET` | `/api/coordinator/verifications[/:verificationId]` | Current coordinator's barangay-scoped verification queue/detail | Not connected. |
 | `GET` | `/api/registrar/verifications[/:verificationId]` | Current registrar's school-scoped verification queue/detail | Not connected. |
@@ -75,19 +78,34 @@ metadata queries are bound to the authenticated student's `Users.user_id`.
 Cross-scope detail requests return not found. These route-level checks do not
 replace the database's existing workflow triggers.
 
-The backend still does **not** provide public program listings, application
-creation/submission/withdrawal, verification decisions, document upload or
-download, award/disbursement APIs, password reset/change, or staff provisioning.
-The frontend portal previews remain placeholders. Document metadata is
-available only to the owning student; `Documents.file_path` is not exposed.
-Private file storage and safe download authorization must be designed before
-upload/download routes are added.
+Application submission creates a draft and submits it through the existing
+database status triggers, which initialize barangay verification. The API
+checks student ownership, current program/cycle windows, duplicate applications,
+and configured barangay allocations. The live Neon schema may be older than
+`Backend/schema.sql`; the endpoint checks for the required unit/cycle,
+allocation, verification, and workflow-trigger schema before permitting writes.
+If those schema objects are absent, it returns `503` and performs no writes.
+The currently configured Neon schema was inspected read-only: its
+`Funding_Programs` table has the legacy `funding_cycle` text field, and the
+funding-unit, funding-cycle, allocation, and application-verification
+relations are absent. The public listing uses the available legacy columns;
+the API reported zero program rows during inspection, so the frontend displays
+an empty catalog. No schema migration is run automatically.
+
+Program descriptions and program-specific eligibility rules are not columns in
+the existing schema, so the public catalog does not invent or return those
+fields. Document upload/download, application withdrawal, verification
+decisions, award/disbursement APIs, password reset/change, and staff
+provisioning are not implemented. Document metadata is available only to the
+owning student; `Documents.file_path` is not exposed. Private file storage and
+safe download authorization must be designed before upload/download routes are
+added.
 
 The existing schema also contains funding duplicate tracking and database
 logic that blocks award approval until a duplicate determination is resolved.
-No API exposes duplicate records or evidence. There is not yet an application
-submission endpoint that invokes this full process, so duplicate prevention is
-not represented as a complete application workflow.
+No API exposes duplicate records or evidence. Duplicate funding review remains
+part of the existing award-approval workflow and is distinct from duplicate
+applications to the same program.
 
 No database schema change was made. `Login_Sessions.token_hash` currently has
 no unique constraint/index although authentication and logout query it. A

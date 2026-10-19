@@ -5,14 +5,6 @@ import FeatureUnavailable from "../components/FeatureUnavailable.jsx";
 import PageHeading from "../components/PageHeading.jsx";
 
 const portalDetails = {
-  student: {
-    eyebrow: "STUDENT PORTAL",
-    title: "Your application journey.",
-    description:
-      "A future home for program discovery, applications, document status, decisions, awards, and disbursement history.",
-    missing:
-      "The backend needs secure student registration and sign-in, ownership-scoped profile and application APIs, document handling, and application-status endpoints.",
-  },
   "lgu-admin": {
     eyebrow: "LGU PROGRAM ADMIN",
     title: "Program oversight, within scope.",

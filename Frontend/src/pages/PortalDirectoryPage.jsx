@@ -16,7 +16,7 @@ const portals = [
     title: "Student application portal",
     role: "Scholar / applicant",
     description:
-      "Profile, program discovery, application tracking, documents, awards, and disbursement history.",
+      "Browse open programs, submit applications, and track verification status.",
   },
   {
     path: "lgu-admin",
@@ -50,7 +50,7 @@ export default function PortalDirectoryPage() {
       <PageHeading
         eyebrow="GRANTWISE PORTALS"
         title="A place for every role."
-        description="These previews describe the intended portal areas based on the database roles. They are not sign-in or protected dashboards; the backend must authorize every request."
+        description="The student portal supports applications and status tracking. Staff portal links remain previews and do not grant access."
       />
 
       <div className="portal-grid">
@@ -63,7 +63,7 @@ export default function PortalDirectoryPage() {
             <h2>{title}</h2>
             <p>{description}</p>
             <Link className="text-link" to={`/portal/${path}`}>
-              View placeholder
+              {path === "student" ? "Open student portal" : "View placeholder"}
               <ArrowRight size={16} aria-hidden="true" />
             </Link>
           </article>
@@ -71,11 +71,11 @@ export default function PortalDirectoryPage() {
       </div>
 
       <div className="access-principle">
-        <strong>Access is not granted by this website.</strong>
+        <strong>Staff access is not granted by these previews.</strong>
         <p>
-          Funding-unit, barangay, school, and student record access must be
-          enforced by authenticated backend APIs. These preview routes do not
-          apply client-side role checks and do not reveal records.
+          Funding-unit, barangay, and school access remains enforced by
+          authenticated backend APIs. The student portal also checks the
+          server-authenticated role before showing personal application data.
         </p>
       </div>
     </div>

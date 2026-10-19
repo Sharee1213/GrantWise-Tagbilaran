@@ -32,6 +32,10 @@ const loginSchema = z.object({
     password: z.string().min(1).max(128)
 }).strict();
 
+const applicationSchema = z.object({
+    programId: z.number().int().positive()
+}).strict();
+
 function tokenHash(token) {
     return crypto.createHash("sha256").update(token).digest("hex");
 }
@@ -45,6 +49,63 @@ function getAllowedOrigins(env) {
             : ["http://localhost:5173"];
 
     return new Set(values.map((origin) => new URL(origin).origin));
+}
+
+async function getSchemaCapabilities(pool) {
+    const result = await pool.query(
+        `SELECT
+            (
+                to_regclass('"Funding_Units"') IS NOT NULL
+                AND to_regclass('"Funding_Cycles"') IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'funding_unit_id'
+                )
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'funding_cycle_id'
+                )
+            ) AS relational_program_schema,
+            (
+                to_regclass('"Program_Barangay_Allocations"') IS NOT NULL
+                AND to_regclass('"Application_Verifications"') IS NOT NULL
+                AND (
+                    SELECT COUNT(DISTINCT trigger_name) = 7
+                    FROM information_schema.triggers
+                    WHERE event_object_schema = current_schema()
+                      AND (
+                          (event_object_table = 'Applications'
+                           AND trigger_name IN (
+                               'trg_application_barangay_check',
+                               'trg_application_status_transition',
+                               'trg_application_funding_unit_scope',
+                               'trg_initialize_application_verification'
+                           ))
+                          OR (event_object_table = 'Application_Verifications'
+                              AND trigger_name IN (
+                                  'trg_validate_application_verification_scope',
+                                  'trg_validate_application_verification_transition',
+                                  'trg_advance_application_verification'
+                              ))
+                      )
+                )
+            ) AS application_workflow_schema,
+            to_regclass('"Application_Verifications"') IS NOT NULL
+                AS has_verification_table`
+    );
+    const capabilities = result.rows[0];
+    return {
+        relationalProgramSchema: capabilities.relational_program_schema,
+        applicationWorkflowEnabled: capabilities.application_workflow_schema,
+        hasVerificationTable: capabilities.has_verification_table,
+        applicationSubmissionEnabled:
+            capabilities.relational_program_schema &&
+            capabilities.application_workflow_schema
+    };
 }
 
 function setSessionCookie(res, token, secure) {
@@ -140,6 +201,60 @@ function createApp({
             res.json({ barangays: barangays.rows, schools: schools.rows });
         } catch (error) {
             next(error);
+        }
+    });
+
+    app.get("/api/programs", async (req, res, next) => {
+        try {
+            const capabilities = await getSchemaCapabilities(pool);
+            const result = capabilities.relationalProgramSchema
+                ? await pool.query(
+                    `SELECT program.program_id, program.program_name,
+                            program.start_date AS application_start_date,
+                            program.end_date AS application_end_date,
+                            cycle.cycle_code,
+                            cycle.start_date AS cycle_start_date,
+                            cycle.end_date AS cycle_end_date,
+                            unit.funding_unit_name,
+                            CASE
+                                WHEN program.start_date > CURRENT_DATE
+                                  OR cycle.start_date > CURRENT_DATE
+                                THEN 'upcoming'
+                                ELSE 'open'
+                            END AS availability
+                     FROM "Funding_Programs" program
+                     JOIN "Funding_Units" unit
+                       ON unit.funding_unit_id = program.funding_unit_id
+                     JOIN "Funding_Cycles" cycle
+                       ON cycle.funding_cycle_id = program.funding_cycle_id
+                     WHERE program.status = 'active'
+                       AND unit.status = 'active'
+                       AND cycle.status = 'active'
+                       AND (program.end_date IS NULL
+                            OR program.end_date >= CURRENT_DATE)
+                       AND (cycle.end_date IS NULL
+                            OR cycle.end_date >= CURRENT_DATE)
+                     ORDER BY COALESCE(program.start_date, cycle.start_date),
+                              program.program_name`
+                )
+                : await pool.query(
+                    `SELECT program_id, program_name,
+                            funding_cycle AS cycle_code,
+                            start_date AS application_start_date,
+                            end_date AS application_end_date,
+                            CASE WHEN start_date > CURRENT_DATE
+                                 THEN 'upcoming' ELSE 'open' END AS availability
+                     FROM "Funding_Programs"
+                     WHERE status = 'active'
+                       AND (end_date IS NULL OR end_date >= CURRENT_DATE)
+                     ORDER BY start_date, program_name`
+                );
+            return res.json({
+                programs: result.rows,
+                applicationSubmissionEnabled: capabilities.applicationSubmissionEnabled
+            });
+        } catch (error) {
+            return next(error);
         }
     });
 
@@ -281,9 +396,11 @@ function createApp({
         }
 
         const result = await pool.query(
-            `SELECT user_id, first_name, last_name, email, password_hash, is_active
-             FROM "Users"
-             WHERE lower(email) = $1
+            `SELECT u.user_id, u.first_name, u.last_name, u.email,
+                    u.password_hash, u.is_active, r.role_name
+             FROM "Users" u
+             JOIN "Roles" r ON r.role_id = u.role_id
+             WHERE lower(u.email) = $1
              LIMIT 1`,
             [input.data.email]
         );
@@ -321,7 +438,8 @@ function createApp({
                 userId: user.user_id,
                 firstName: user.first_name,
                 lastName: user.last_name,
-                email: user.email
+                email: user.email,
+                role: user.role_name
             }
         });
     });
@@ -457,22 +575,193 @@ function createApp({
         requireAuthentication,
         requireRole("Scholar"),
         async (req, res) => {
-            const result = await pool.query(
-                `SELECT application.application_id, application.application_status,
-                        application.submitted_at, application.created_at, application.updated_at,
-                        program.program_id, program.program_name,
-                        cycle.cycle_code
-                 FROM "Applications" application
-                 JOIN "Students" student ON student.student_id = application.student_id
-                 JOIN "Funding_Programs" program ON program.program_id = application.program_id
-                 LEFT JOIN "Funding_Cycles" cycle
-                   ON cycle.funding_cycle_id = program.funding_cycle_id
-                 WHERE student.user_id = $1 AND student.is_active = TRUE
-                 ORDER BY application.created_at DESC
-                 LIMIT $2`,
-                [req.auth.userId, MAX_QUEUE_SIZE]
-            );
+            const capabilities = await getSchemaCapabilities(pool);
+            const result = capabilities.relationalProgramSchema
+                ? await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name,
+                            cycle.cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     LEFT JOIN "Funding_Cycles" cycle
+                       ON cycle.funding_cycle_id = program.funding_cycle_id
+                     WHERE student.user_id = $1 AND student.is_active = TRUE
+                     ORDER BY application.created_at DESC
+                     LIMIT $2`,
+                    [req.auth.userId, MAX_QUEUE_SIZE]
+                )
+                : await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name,
+                            program.funding_cycle AS cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     WHERE student.user_id = $1 AND student.is_active = TRUE
+                     ORDER BY application.created_at DESC
+                     LIMIT $2`,
+                    [req.auth.userId, MAX_QUEUE_SIZE]
+                );
             return res.json({ applications: result.rows });
+        }
+    );
+
+    app.post(
+        "/api/student/applications",
+        requireAuthentication,
+        requireRole("Scholar"),
+        async (req, res, next) => {
+            const input = applicationSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Application details are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+
+            let capabilities;
+            try {
+                capabilities = await getSchemaCapabilities(pool);
+            } catch (error) {
+                return next(error);
+            }
+            if (!capabilities.applicationSubmissionEnabled) {
+                return res.status(503).json({
+                    message: "Online applications are unavailable until the required funding and verification database schema is installed."
+                });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                const student = await client.query(
+                    `SELECT student.student_id, resident.barangay_id
+                     FROM "Students" student
+                     JOIN "Users" resident ON resident.user_id = student.user_id
+                     WHERE student.user_id = $1
+                       AND student.student_id = $2
+                       AND student.is_active = TRUE
+                       AND resident.is_active = TRUE
+                     FOR UPDATE OF student`,
+                    [req.auth.userId, req.auth.scopeId]
+                );
+                if (student.rowCount !== 1 || !student.rows[0].barangay_id) {
+                    await client.query("ROLLBACK");
+                    return res.status(403).json({
+                        message: "An active student profile with a barangay is required to apply."
+                    });
+                }
+
+                const program = await client.query(
+                    `SELECT program.program_id
+                     FROM "Funding_Programs" program
+                     JOIN "Funding_Units" unit
+                       ON unit.funding_unit_id = program.funding_unit_id
+                     JOIN "Funding_Cycles" cycle
+                       ON cycle.funding_cycle_id = program.funding_cycle_id
+                     WHERE program.program_id = $1
+                       AND program.status = 'active'
+                       AND unit.status = 'active'
+                       AND cycle.status = 'active'
+                       AND (program.start_date IS NULL
+                            OR program.start_date <= CURRENT_DATE)
+                       AND (program.end_date IS NULL
+                            OR program.end_date >= CURRENT_DATE)
+                       AND (cycle.start_date IS NULL
+                            OR cycle.start_date <= CURRENT_DATE)
+                       AND (cycle.end_date IS NULL
+                            OR cycle.end_date >= CURRENT_DATE)
+                       AND (
+                           NOT EXISTS (
+                               SELECT 1
+                               FROM "Program_Barangay_Allocations" configured
+                               WHERE configured.program_id = program.program_id
+                           )
+                           OR EXISTS (
+                               SELECT 1
+                               FROM "Program_Barangay_Allocations" allocation
+                               WHERE allocation.program_id = program.program_id
+                                 AND allocation.barangay_id = $2
+                                 AND allocation.allocated_amount >
+                                     allocation.reserved_amount + allocation.released_amount
+                           )
+                       )
+                     FOR SHARE OF program`,
+                    [input.data.programId, student.rows[0].barangay_id]
+                );
+                if (program.rowCount !== 1) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: "This program is not currently accepting applications for your barangay."
+                    });
+                }
+
+                const existingApplication = await client.query(
+                    `SELECT application_id
+                     FROM "Applications"
+                     WHERE student_id = $1
+                       AND program_id = $2
+                       AND application_status <> 'withdrawn'
+                     LIMIT 1`,
+                    [student.rows[0].student_id, input.data.programId]
+                );
+                if (existingApplication.rowCount > 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(409).json({
+                        message: "You already have an active application for this program."
+                    });
+                }
+
+                const application = await client.query(
+                    `INSERT INTO "Applications" (
+                        student_id, program_id, barangay_id, application_status
+                     ) VALUES ($1, $2, $3, 'draft')
+                     RETURNING application_id`,
+                    [
+                        student.rows[0].student_id,
+                        input.data.programId,
+                        student.rows[0].barangay_id
+                    ]
+                );
+                await client.query(
+                    `UPDATE "Applications"
+                     SET application_status = 'submitted'
+                     WHERE application_id = $1`,
+                    [application.rows[0].application_id]
+                );
+                const submitted = await client.query(
+                    `SELECT application.application_id,
+                            application.application_status,
+                            application.submitted_at
+                     FROM "Applications" application
+                     WHERE application.application_id = $1`,
+                    [application.rows[0].application_id]
+                );
+                await client.query("COMMIT");
+                return res.status(201).json({ application: submitted.rows[0] });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Application transaction rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (error.code === "23505") {
+                    return res.status(409).json({
+                        message: "You already have an active application for this program."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
         }
     );
 
@@ -485,31 +774,48 @@ function createApp({
             if (!Number.isSafeInteger(applicationId) || applicationId < 1) {
                 return res.status(400).json({ message: "Application ID is invalid." });
             }
-            const result = await pool.query(
-                `SELECT application.application_id, application.application_status,
-                        application.submitted_at, application.created_at, application.updated_at,
-                        program.program_id, program.program_name, cycle.cycle_code
-                 FROM "Applications" application
-                 JOIN "Students" student ON student.student_id = application.student_id
-                 JOIN "Funding_Programs" program ON program.program_id = application.program_id
-                 LEFT JOIN "Funding_Cycles" cycle
-                   ON cycle.funding_cycle_id = program.funding_cycle_id
-                 WHERE application.application_id = $1
-                   AND student.user_id = $2
-                   AND student.is_active = TRUE`,
-                [applicationId, req.auth.userId]
-            );
+            const capabilities = await getSchemaCapabilities(pool);
+            const result = capabilities.relationalProgramSchema
+                ? await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name, cycle.cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     LEFT JOIN "Funding_Cycles" cycle
+                       ON cycle.funding_cycle_id = program.funding_cycle_id
+                     WHERE application.application_id = $1
+                       AND student.user_id = $2
+                       AND student.is_active = TRUE`,
+                    [applicationId, req.auth.userId]
+                )
+                : await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name,
+                            program.funding_cycle AS cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     WHERE application.application_id = $1
+                       AND student.user_id = $2
+                       AND student.is_active = TRUE`,
+                    [applicationId, req.auth.userId]
+                );
             if (result.rowCount === 0) {
                 return res.status(404).json({ message: "Application not found." });
             }
 
-            const verifications = await pool.query(
-                `SELECT verification_type, status, activated_at, reviewed_at
-                 FROM "Application_Verifications"
-                 WHERE application_id = $1
-                 ORDER BY activated_at`,
-                [applicationId]
-            );
+            const verifications = capabilities.hasVerificationTable
+                ? await pool.query(
+                    `SELECT verification_type, status, activated_at, reviewed_at
+                     FROM "Application_Verifications"
+                     WHERE application_id = $1
+                     ORDER BY activated_at`,
+                    [applicationId]
+                )
+                : { rows: [] };
             return res.json({
                 application: result.rows[0],
                 verifications: verifications.rows
