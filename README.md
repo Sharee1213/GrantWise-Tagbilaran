@@ -121,7 +121,10 @@ error details.
    this default; configure `NODE_ENV=production` and the exact trusted frontend
    origin(s) in production.
 3. From `Backend/`, install dependencies with `npm install`.
-4. Start the API with `npm run dev` (or `npm start`).
+4. For local student signup, start the API with `npm run dev`. `npm start`
+   (and `node server.js`) does not set `NODE_ENV`; registration remains disabled
+   unless you explicitly start it with `NODE_ENV=development`. Production must
+   set `NODE_ENV=production`.
 
 The backend folder's `.gitignore` excludes `.env`. There is no backend
 `.env.example` in the repository.

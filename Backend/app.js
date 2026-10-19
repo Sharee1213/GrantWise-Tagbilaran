@@ -200,15 +200,16 @@ function createApp({
                     [data.barangayId]
                 );
 
-                if (
-                    existingUser.rowCount > 0 ||
-                    existingStudent.rowCount > 0 ||
-                    approvedSchool.rowCount === 0 ||
-                    existingBarangay.rowCount === 0
-                ) {
+                if (existingUser.rowCount > 0 || existingStudent.rowCount > 0) {
                     await client.query("ROLLBACK");
                     return res.status(409).json({
-                        message: "Account details could not be registered. Check the information and try again."
+                        message: "An account with this email or student number already exists."
+                    });
+                }
+                if (approvedSchool.rowCount === 0 || existingBarangay.rowCount === 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: "Select a valid barangay and an approved school."
                     });
                 }
 
@@ -263,7 +264,7 @@ function createApp({
                 }
                 if (error.code === "23505") {
                     return res.status(409).json({
-                        message: "Account details could not be registered. Check the information and try again."
+                        message: "An account with this email or student number already exists."
                     });
                 }
                 throw error;

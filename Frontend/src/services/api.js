@@ -1,8 +1,8 @@
-const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL;
-
-export const API_BASE_URL = (
-  configuredBaseUrl || "http://localhost:5000/api"
+const configuredBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"
 ).replace(/\/+$/, "");
+
+export const API_BASE_URL = `${configuredBaseUrl.replace(/(?:\/api)+$/i, "")}/api`;
 
 export class ApiError extends Error {
   constructor(message, status, payload) {
@@ -18,6 +18,7 @@ async function requestJson(url, options = {}) {
   try {
     response = await fetch(url, {
       ...options,
+      credentials: options.credentials || "include",
       headers: {
         Accept: "application/json",
         ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -25,11 +26,11 @@ async function requestJson(url, options = {}) {
       },
     });
   } catch (error) {
-    if (error.name === "AbortError") {
+    if (error?.name === "AbortError") {
       throw error;
     }
     throw new ApiError(
-      "Unable to connect to the GrantWise API. Check that the service is running and the API URL is correct.",
+      "Could not contact the GrantWise API. Check that the backend is running and allows this frontend origin.",
       null,
       null,
     );
@@ -57,7 +58,7 @@ async function requestJson(url, options = {}) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const normalizedPath = path.replace(/^\/+/, "");
+  const normalizedPath = path.replace(/^\/+/, "").replace(/^(?:api\/)+/i, "");
   return requestJson(`${API_BASE_URL}/${normalizedPath}`, options);
 }
 

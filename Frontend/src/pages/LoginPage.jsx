@@ -1,9 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
-
-const API = import.meta.env.VITE_API_BASE_URL;
+import { apiRequest } from "../services/api.js";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -12,25 +11,36 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    let active = true;
+    apiRequest("auth/me")
+      .then(() => {
+        if (active) {
+          navigate("/portals", { replace: true });
+        }
+      })
+      .catch((requestError) => {
+        if (active && requestError.status !== 401) {
+          setError(requestError.message || "Unable to check the current session.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/login`, {
+      await apiRequest("auth/login", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.message || "Login failed.");
-        return;
-      }
       navigate("/portals");
-    } catch {
-      setError("Cannot reach the server. Is the backend running?");
+    } catch (requestError) {
+      setError(requestError.message || "Login failed.");
     } finally {
       setLoading(false);
     }

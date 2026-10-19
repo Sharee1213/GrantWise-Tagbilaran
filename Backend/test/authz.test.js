@@ -137,13 +137,33 @@ class FakePool {
         }
 
         if (sql.startsWith('SELECT 1 FROM "Users" WHERE lower(email)')) {
+            if (this.duplicateEmail) {
+                return { rowCount: 1, rows: [{}] };
+            }
             return { rowCount: 0, rows: [] };
         }
 
         if (
             sql.startsWith('SELECT 1 FROM "Students"')
         ) {
+            if (this.duplicateStudentNumber) {
+                return { rowCount: 1, rows: [{}] };
+            }
             return { rowCount: 0, rows: [{}] };
+        }
+
+        if (sql.startsWith('SELECT barangay_id, barangay_name FROM "Barangays"')) {
+            return {
+                rowCount: 1,
+                rows: [{ barangay_id: 1, barangay_name: "Fixture Barangay" }]
+            };
+        }
+
+        if (sql.startsWith('SELECT school_id, school_name FROM "Schools"')) {
+            return {
+                rowCount: 1,
+                rows: [{ school_id: 1, school_name: "Fixture School" }]
+            };
         }
 
         if (sql.startsWith('SELECT 1 FROM "Barangays"')) {
@@ -663,6 +683,45 @@ test("registration hashes the password and assigns only the Scholar role", async
     );
     assert.equal(fakePool.insertedStudentValues[0], 88);
     assert.equal(JSON.stringify(response.body).includes(password), false);
+});
+
+test("registration reports duplicate account details without writing records", async () => {
+    const duplicatePool = new FakePool();
+    duplicatePool.duplicateEmail = true;
+    const duplicateApp = createApp({
+        pool: duplicatePool,
+        enableTestRegistration: true,
+        env: { NODE_ENV: "test", FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    const response = await request(duplicateApp)
+        .post("/api/auth/register")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            firstName: "Existing",
+            lastName: "Student",
+            email: "existing@example.test",
+            password: "a sufficiently long password",
+            barangayId: 1,
+            schoolId: 1,
+            studentNumber: "EXISTING-1",
+            course: "Education"
+        });
+
+    assert.equal(response.status, 409);
+    assert.match(response.body.message, /email or student number already exists/);
+    assert.equal(duplicatePool.registrationWriteCount || 0, 0);
+});
+
+test("lookups return only barangays and approved schools", async () => {
+    const response = await request(app).get("/api/lookups");
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, {
+        barangays: [{ barangay_id: 1, barangay_name: "Fixture Barangay" }],
+        schools: [{ school_id: 1, school_name: "Fixture School" }]
+    });
 });
 
 test("state-changing authentication requests reject untrusted origins", async () => {

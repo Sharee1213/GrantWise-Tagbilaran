@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
-
-const API = import.meta.env.VITE_API_BASE_URL;
+import { apiRequest } from "../services/api.js";
 
 export default function SignUpPage() {
   const [form, setForm] = useState({
@@ -16,13 +15,25 @@ export default function SignUpPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetch(`${API}/lookups`)
-      .then((r) => r.json())
-      .then((d) => {
-        setBarangays(d.barangays || []);
-        setSchools(d.schools || []);
+    let active = true;
+    apiRequest("lookups")
+      .then((data) => {
+        if (!Array.isArray(data?.barangays) || !Array.isArray(data?.schools)) {
+          throw new Error("The API returned an invalid lookup response.");
+        }
+        if (active) {
+          setBarangays(data.barangays);
+          setSchools(data.schools);
+        }
       })
-      .catch(() => setError("Could not load barangays and schools."));
+      .catch((requestError) => {
+        if (active) {
+          setError(`Could not load barangays and schools. ${requestError.message}`);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const update = (e) => setForm({ ...form, [e.target.name]: e.target.value });
@@ -32,10 +43,8 @@ export default function SignUpPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/register`, {
+      await apiRequest("auth/register", {
         method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
           barangayId: Number(form.barangayId),
@@ -44,15 +53,12 @@ export default function SignUpPage() {
           yearLevel: form.yearLevel || null,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        const details = data.errors?.map((x) => `${x.field}: ${x.message}`).join(", ");
-        setError(details || data.message || "Registration failed.");
-        return;
-      }
       navigate("/login");
-    } catch {
-      setError("Cannot reach the server. Is the backend running?");
+    } catch (requestError) {
+      const details = requestError.payload?.errors
+        ?.map((item) => `${item.field}: ${item.message}`)
+        .join(", ");
+      setError(details || requestError.message || "Registration failed.");
     } finally {
       setLoading(false);
     }
