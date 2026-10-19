@@ -1,5 +1,9 @@
 require("dotenv").config();
 
+if (!process.env.NODE_ENV) {
+    process.env.NODE_ENV = "development";
+}
+
 const { createApp } = require("./app");
 
 const app = createApp();

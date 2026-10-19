@@ -15,72 +15,72 @@ const SESSION_DURATION_SECONDS = SESSION_DURATION_MS / 1000;
 const MAX_QUEUE_SIZE = 50;
 
 const registrationSchema = z.object({
-    firstName: z.string().trim().min(1).max(100),
-    lastName: z.string().trim().min(1).max(100),
-    email: z.string().trim().email().max(255).transform((value) => value.toLowerCase()),
-    password: z.string().min(12).max(128),
-    phoneNumber: z.string().trim().max(30).optional().nullable(),
-    barangayId: z.number().int().positive(),
-    schoolId: z.number().int().positive(),
-    studentNumber: z.string().trim().min(1).max(50),
-    course: z.string().trim().min(1).max(100),
-    yearLevel: z.string().trim().max(50).optional().nullable()
+    firstName: z.string({ required_error: "First name is required." })
+        .trim()
+        .min(1, "First name is required.")
+        .max(100, "First name must be 100 characters or fewer."),
+    lastName: z.string({ required_error: "Last name is required." })
+        .trim()
+        .min(1, "Last name is required.")
+        .max(100, "Last name must be 100 characters or fewer."),
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .email("Enter a valid email address.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => value.toLowerCase()),
+    password: z.string({ required_error: "Password is required." })
+        .min(12, "Password must be at least 12 characters long.")
+        .max(128, "Password must be 128 characters or fewer.")
+        .refine((value) => value.trim().length > 0, {
+            message: "Password cannot contain only whitespace."
+        }),
+    phoneNumber: z.string()
+        .trim()
+        .max(30, "Phone number must be 30 characters or fewer.")
+        .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+        .optional()
+        .nullable(),
+    barangayId: z.number({ required_error: "Select your barangay." })
+        .int("Select a valid barangay.")
+        .positive("Select a valid barangay."),
+    schoolId: z.number({ required_error: "Select your school." })
+        .int("Select an approved school.")
+        .positive("Select an approved school."),
+    studentNumber: z.string({ required_error: "Student number is required." })
+        .trim()
+        .min(1, "Student number is required.")
+        .max(50, "Student number must be 50 characters or fewer."),
+    course: z.string({ required_error: "Course or degree program is required." })
+        .trim()
+        .min(1, "Course or degree program is required.")
+        .max(100, "Course must be 100 characters or fewer."),
+    yearLevel: z.string()
+        .trim()
+        .max(50, "Year level must be 50 characters or fewer.")
+        .optional()
+        .nullable()
 }).strict();
 
 const loginSchema = z.object({
-    email: z.string().trim().email().max(255).transform((value) => value.toLowerCase()),
-    password: z.string().min(1).max(128)
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .email("Enter a valid email address.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => value.toLowerCase()),
+    password: z.string({ required_error: "Password is required." })
+        .min(1, "Password is required.")
+        .max(128, "Password must be 128 characters or fewer.")
+        .refine((value) => value.trim().length > 0, {
+            message: "Password cannot contain only whitespace."
+        })
 }).strict();
 
 const applicationSchema = z.object({
     programId: z.number().int().positive()
 }).strict();
 
-function tokenHash(token) {
-    return crypto.createHash("sha256").update(token).digest("hex");
-}
-
-function getAllowedOrigins(env) {
-    const configured = env.FRONTEND_ORIGINS || env.FRONTEND_ORIGIN;
-    const values = configured
-        ? configured.split(",").map((origin) => origin.trim()).filter(Boolean)
-        : env.NODE_ENV === "production"
-            ? []
-            : ["http://localhost:5173"];
-
-    return new Set(values.map((origin) => new URL(origin).origin));
-}
-
-async function getSchemaCapabilities(pool) {
-    const result = await pool.query(
-        `SELECT
-            (
-                to_regclass('"Funding_Units"') IS NOT NULL
-                AND to_regclass('"Funding_Cycles"') IS NOT NULL
-                AND EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'Funding_Programs'
-                      AND column_name = 'funding_unit_id'
-                )
-                AND EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'Funding_Programs'
-                      AND column_name = 'funding_cycle_id'
-                )
-            ) AS relational_program_schema,
-            (
-                to_regclass('"Program_Barangay_Allocations"') IS NOT NULL
-                AND to_regclass('"Application_Verifications"') IS NOT NULL
-                AND (
-                    SELECT COUNT(DISTINCT trigger_name) = 7
-                    FROM information_schema.triggers
-                    WHERE event_object_schema = current_schema()
-                      AND (
-                          (event_object_table = 'Applications'
-                           AND trigger_name IN (
-                               'trg_application_barangay_check',
 const verificationDecisionSchema = z.object({
     status: z.enum(["approved", "rejected", "needs_information", "pending"]),
     remarks: z.string().trim().max(2000).optional().nullable()
@@ -158,6 +158,71 @@ const eligibilityCheckSchema = z.object({
     remarks: z.string().trim().max(2000).optional().nullable()
 }).strict();
 
+function tokenHash(token) {
+    return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function getAllowedOrigins(env) {
+    const configured = env.FRONTEND_ORIGINS || env.FRONTEND_ORIGIN;
+    const values = configured
+        ? configured.split(",").map((origin) => origin.trim()).filter(Boolean)
+        : env.NODE_ENV === "production"
+            ? []
+            : ["http://localhost:5173"];
+
+    return new Set(values.map((origin) => new URL(origin).origin));
+}
+
+async function getSchemaCapabilities(pool) {
+    const result = await pool.query(
+        `SELECT
+            (
+                to_regclass('"Funding_Units"') IS NOT NULL
+                AND to_regclass('"Funding_Cycles"') IS NOT NULL
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'funding_unit_id'
+                )
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'funding_cycle_id'
+                )
+            ) AS relational_program_schema,
+            EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'LGU_Admins'
+                  AND column_name = 'funding_unit_id'
+            ) AS has_admin_funding_unit_assignment,
+            (
+                EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'reserved_budget'
+                )
+                AND EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = 'Funding_Programs'
+                      AND column_name = 'released_budget'
+                )
+            ) AS has_program_budget_balances,
+            (
+                to_regclass('"Program_Barangay_Allocations"') IS NOT NULL
+                AND to_regclass('"Application_Verifications"') IS NOT NULL
+                AND (
+                    SELECT COUNT(DISTINCT trigger_name) = 7
+                    FROM information_schema.triggers
+                    WHERE event_object_schema = current_schema()
+                      AND (
+                          (event_object_table = 'Applications'
+                           AND trigger_name IN (
+                               'trg_application_barangay_check',
                                'trg_application_status_transition',
                                'trg_application_funding_unit_scope',
                                'trg_initialize_application_verification'
@@ -197,6 +262,17 @@ const eligibilityCheckSchema = z.object({
         relationalProgramSchema: capabilities.relational_program_schema,
         applicationWorkflowEnabled: capabilities.application_workflow_schema,
         hasVerificationTable: capabilities.has_verification_table,
+        hasAdminFundingUnitAssignment: capabilities.has_admin_funding_unit_assignment,
+        hasProgramBudgetBalances: capabilities.has_program_budget_balances,
+        hasAwardApprovalFunction: capabilities.has_award_approval_function,
+        hasStaffAdminWorkflow: capabilities.has_staff_admin_workflow,
+        adminPortalEnabled:
+            capabilities.relational_program_schema &&
+            capabilities.application_workflow_schema &&
+            capabilities.has_admin_funding_unit_assignment &&
+            capabilities.has_program_budget_balances &&
+            capabilities.has_award_approval_function &&
+            capabilities.has_staff_admin_workflow,
         applicationSubmissionEnabled:
             capabilities.relational_program_schema &&
             capabilities.application_workflow_schema
@@ -210,26 +286,6 @@ function setSessionCookie(res, token, secure) {
         sameSite: "strict",
         path: "/api",
         maxAge: SESSION_DURATION_MS
-            EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = 'LGU_Admins'
-                  AND column_name = 'funding_unit_id'
-            ) AS has_admin_funding_unit_assignment,
-            (
-                EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'Funding_Programs'
-                      AND column_name = 'reserved_budget'
-                )
-                AND EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = current_schema()
-                      AND table_name = 'Funding_Programs'
-                      AND column_name = 'released_budget'
-                )
-            ) AS has_program_budget_balances,
     });
 }
 
@@ -262,17 +318,6 @@ function createApp({
         credentials: true,
         origin(origin, callback) {
             callback(null, !origin || allowedOrigins.has(origin));
-        hasAdminFundingUnitAssignment: capabilities.has_admin_funding_unit_assignment,
-        hasProgramBudgetBalances: capabilities.has_program_budget_balances,
-        hasAwardApprovalFunction: capabilities.has_award_approval_function,
-        hasStaffAdminWorkflow: capabilities.has_staff_admin_workflow,
-        adminPortalEnabled:
-            capabilities.relational_program_schema &&
-            capabilities.application_workflow_schema &&
-            capabilities.has_admin_funding_unit_assignment &&
-            capabilities.has_program_budget_balances &&
-            capabilities.has_award_approval_function &&
-            capabilities.has_staff_admin_workflow,
         }
     }));
     app.use(express.json({ limit: "32kb", strict: true }));
@@ -443,14 +488,42 @@ function createApp({
 
                 if (existingUser.rowCount > 0 || existingStudent.rowCount > 0) {
                     await client.query("ROLLBACK");
+                    const conflictErrors = [];
+                    if (existingUser.rowCount > 0) {
+                        conflictErrors.push({
+                            field: "email",
+                            message: "An account with this email address already exists."
+                        });
+                    }
+                    if (existingStudent.rowCount > 0) {
+                        conflictErrors.push({
+                            field: "studentNumber",
+                            message: "This student number is already registered."
+                        });
+                    }
                     return res.status(409).json({
-                        message: "An account with this email or student number already exists."
+                        message: "An account with this email or student number already exists.",
+                        errors: conflictErrors
                     });
                 }
                 if (approvedSchool.rowCount === 0 || existingBarangay.rowCount === 0) {
                     await client.query("ROLLBACK");
+                    const lookupErrors = [];
+                    if (existingBarangay.rowCount === 0) {
+                        lookupErrors.push({
+                            field: "barangayId",
+                            message: "Select a valid barangay."
+                        });
+                    }
+                    if (approvedSchool.rowCount === 0) {
+                        lookupErrors.push({
+                            field: "schoolId",
+                            message: "Select an approved school."
+                        });
+                    }
                     return res.status(400).json({
-                        message: "Select a valid barangay and an approved school."
+                        message: "Select a valid barangay and an approved school.",
+                        errors: lookupErrors
                     });
                 }
 
@@ -518,7 +591,13 @@ function createApp({
     app.post("/api/auth/login", authRateLimit, async (req, res) => {
         const input = loginSchema.safeParse(req.body);
         if (!input.success) {
-            return res.status(400).json({ message: "Email or password is invalid." });
+            return res.status(400).json({
+                message: "Email or password is invalid.",
+                errors: input.error.issues.map(({ path, message }) => ({
+                    field: path.join(".") || "form",
+                    message
+                }))
+            });
         }
 
         const result = await pool.query(
@@ -577,6 +656,10 @@ function createApp({
         }
 
         try {
+            const capabilities = await getSchemaCapabilities(pool);
+            const adminFundingUnit = capabilities.hasAdminFundingUnitAssignment
+                ? "admin.funding_unit_id"
+                : "NULL::INTEGER";
             const result = await pool.query(
                 `SELECT u.user_id, u.first_name, u.last_name, u.email,
                         r.role_name,
@@ -621,6 +704,14 @@ function createApp({
             if (row.role_name === "Registrar") scopeId = row.registrar_school_id;
 
             if (!scopeId) {
+                if (
+                    row.role_name === "LGU Admin" &&
+                    !capabilities.hasAdminFundingUnitAssignment
+                ) {
+                    return res.status(503).json({
+                        message: "The funding-unit assignment schema is not installed."
+                    });
+                }
                 return res.status(403).json({
                     message: "This account does not have an active role assignment."
                 });
@@ -649,97 +740,6 @@ function createApp({
         };
     }
 
-    app.post("/api/auth/logout", requireAuthentication, async (req, res) => {
-        await pool.query(
-            `UPDATE "Login_Sessions"
-             SET revoked_at = NOW()
-             WHERE token_hash = $1 AND revoked_at IS NULL`,
-            [tokenHash(req.cookies[SESSION_COOKIE])]
-        );
-            const capabilities = await getSchemaCapabilities(pool);
-            const adminFundingUnit = capabilities.hasAdminFundingUnitAssignment
-                ? "admin.funding_unit_id"
-                : "NULL::INTEGER";
-        clearSessionCookie(res, secureCookies);
-        return res.json({ message: "Signed out." });
-    });
-
-    app.get("/api/auth/me", requireAuthentication, (req, res) => {
-        res.json({
-            user: {
-                userId: req.auth.userId,
-                firstName: req.auth.firstName,
-                lastName: req.auth.lastName,
-                email: req.auth.email,
-                role: req.auth.role
-            }
-        });
-    });
-
-    app.get(
-        "/api/student/profile",
-        requireAuthentication,
-        requireRole("Scholar"),
-        async (req, res) => {
-            const result = await pool.query(
-                `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone_number,
-                        u.barangay_id, barangay.barangay_name,
-                        student.student_id, student.school_id, school.school_name,
-                        student.student_number, student.course, student.year_level
-                 FROM "Users" u
-                 JOIN "Students" student ON student.user_id = u.user_id
-                 JOIN "Schools" school ON school.school_id = student.school_id
-                 LEFT JOIN "Barangays" barangay ON barangay.barangay_id = u.barangay_id
-                 WHERE u.user_id = $1 AND student.is_active = TRUE`,
-                [req.auth.userId]
-            );
-            if (result.rowCount === 0) {
-                return res.status(404).json({ message: "Student profile not found." });
-            }
-            return res.json({ profile: result.rows[0] });
-        }
-    );
-
-    app.get(
-        "/api/student/applications",
-        requireAuthentication,
-        requireRole("Scholar"),
-                if (
-                    row.role_name === "LGU Admin" &&
-                    !capabilities.hasAdminFundingUnitAssignment
-                ) {
-                    return res.status(503).json({
-                        message: "The funding-unit assignment schema is not installed."
-                    });
-                }
-        async (req, res) => {
-            const capabilities = await getSchemaCapabilities(pool);
-            const result = capabilities.relationalProgramSchema
-                ? await pool.query(
-                    `SELECT application.application_id, application.application_status,
-                            application.submitted_at, application.created_at, application.updated_at,
-                            program.program_id, program.program_name,
-                            cycle.cycle_code
-                     FROM "Applications" application
-                     JOIN "Students" student ON student.student_id = application.student_id
-                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
-                     LEFT JOIN "Funding_Cycles" cycle
-                       ON cycle.funding_cycle_id = program.funding_cycle_id
-                     WHERE student.user_id = $1 AND student.is_active = TRUE
-                     ORDER BY application.created_at DESC
-                     LIMIT $2`,
-                    [req.auth.userId, MAX_QUEUE_SIZE]
-                )
-                : await pool.query(
-                    `SELECT application.application_id, application.application_status,
-                            application.submitted_at, application.created_at, application.updated_at,
-                            program.program_id, program.program_name,
-                            program.funding_cycle AS cycle_code
-                     FROM "Applications" application
-                     JOIN "Students" student ON student.student_id = application.student_id
-                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
-                     WHERE student.user_id = $1 AND student.is_active = TRUE
-                     ORDER BY application.created_at DESC
     async function requireStaffSchema(res, { admin = false } = {}) {
         const capabilities = await getSchemaCapabilities(pool);
         const available = admin
@@ -1304,6 +1304,85 @@ function createApp({
         }
     );
 
+    app.post("/api/auth/logout", requireAuthentication, async (req, res) => {
+        await pool.query(
+            `UPDATE "Login_Sessions"
+             SET revoked_at = NOW()
+             WHERE token_hash = $1 AND revoked_at IS NULL`,
+            [tokenHash(req.cookies[SESSION_COOKIE])]
+        );
+        clearSessionCookie(res, secureCookies);
+        return res.json({ message: "Signed out." });
+    });
+
+    app.get("/api/auth/me", requireAuthentication, (req, res) => {
+        res.json({
+            user: {
+                userId: req.auth.userId,
+                firstName: req.auth.firstName,
+                lastName: req.auth.lastName,
+                email: req.auth.email,
+                role: req.auth.role
+            }
+        });
+    });
+
+    app.get(
+        "/api/student/profile",
+        requireAuthentication,
+        requireRole("Scholar"),
+        async (req, res) => {
+            const result = await pool.query(
+                `SELECT u.user_id, u.first_name, u.last_name, u.email, u.phone_number,
+                        u.barangay_id, barangay.barangay_name,
+                        student.student_id, student.school_id, school.school_name,
+                        student.student_number, student.course, student.year_level
+                 FROM "Users" u
+                 JOIN "Students" student ON student.user_id = u.user_id
+                 JOIN "Schools" school ON school.school_id = student.school_id
+                 LEFT JOIN "Barangays" barangay ON barangay.barangay_id = u.barangay_id
+                 WHERE u.user_id = $1 AND student.is_active = TRUE`,
+                [req.auth.userId]
+            );
+            if (result.rowCount === 0) {
+                return res.status(404).json({ message: "Student profile not found." });
+            }
+            return res.json({ profile: result.rows[0] });
+        }
+    );
+
+    app.get(
+        "/api/student/applications",
+        requireAuthentication,
+        requireRole("Scholar"),
+        async (req, res) => {
+            const capabilities = await getSchemaCapabilities(pool);
+            const result = capabilities.relationalProgramSchema
+                ? await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name,
+                            cycle.cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     LEFT JOIN "Funding_Cycles" cycle
+                       ON cycle.funding_cycle_id = program.funding_cycle_id
+                     WHERE student.user_id = $1 AND student.is_active = TRUE
+                     ORDER BY application.created_at DESC
+                     LIMIT $2`,
+                    [req.auth.userId, MAX_QUEUE_SIZE]
+                )
+                : await pool.query(
+                    `SELECT application.application_id, application.application_status,
+                            application.submitted_at, application.created_at, application.updated_at,
+                            program.program_id, program.program_name,
+                            program.funding_cycle AS cycle_code
+                     FROM "Applications" application
+                     JOIN "Students" student ON student.student_id = application.student_id
+                     JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     WHERE student.user_id = $1 AND student.is_active = TRUE
+                     ORDER BY application.created_at DESC
                      LIMIT $2`,
                     [req.auth.userId, MAX_QUEUE_SIZE]
                 );
@@ -1591,7 +1670,37 @@ function createApp({
             requireRole(role)
         ];
 
+        if (role !== "LGU Admin") {
+            app.get(`${path.replace("/verifications", "")}/dashboard`,
+                ...roleMiddleware,
+                async (req, res) => {
+                    if (!await requireStaffSchema(res)) return;
+                    const result = await pool.query(
+                        `SELECT COUNT(*) FILTER (
+                                    WHERE verification.status = 'pending'
+                                )::INTEGER AS pending_count,
+                                COUNT(*) FILTER (
+                                    WHERE verification.status = 'needs_information'
+                                )::INTEGER AS needs_information_count
+                         FROM "Application_Verifications" verification
+                         JOIN "Applications" application
+                           ON application.application_id = verification.application_id
+                         JOIN "Students" student
+                           ON student.student_id = application.student_id
+                         JOIN "Funding_Programs" program
+                           ON program.program_id = application.program_id
+                         WHERE verification.verification_type = $1
+                           AND verification.status IN ('pending', 'needs_information')
+                           AND ${scopeColumn} = $2`,
+                        [verificationType, req.auth.scopeId]
+                    );
+                    return res.json({ summary: result.rows[0] });
+                }
+            );
+        }
+
         app.get(path, ...roleMiddleware, async (req, res) => {
+            if (!await requireStaffSchema(res, { admin: role === "LGU Admin" })) return;
             const result = await pool.query(
                 `SELECT verification.verification_id, verification.application_id,
                         verification.status, verification.activated_at,
@@ -1693,59 +1802,7 @@ function createApp({
             }
             return res.json(response);
         });
-    }
 
-    app.use((error, req, res, next) => {
-        if (res.headersSent) return next(error);
-        if (error instanceof SyntaxError && error.status === 400 && "body" in error) {
-            return res.status(400).json({ message: "Request body must be valid JSON." });
-        }
-        logger.error("Request failed", {
-            method: req.method,
-            path: req.path,
-            code: error.code,
-            name: error.name
-        });
-        return res.status(500).json({ message: "An internal error occurred." });
-    });
-
-    return app;
-}
-
-module.exports = {
-        if (role !== "LGU Admin") {
-            app.get(`${path.replace("/verifications", "")}/dashboard`,
-                ...roleMiddleware,
-                async (req, res) => {
-                    if (!await requireStaffSchema(res)) return;
-                    const result = await pool.query(
-                        `SELECT COUNT(*) FILTER (
-                                    WHERE verification.status = 'pending'
-                                )::INTEGER AS pending_count,
-                                COUNT(*) FILTER (
-                                    WHERE verification.status = 'needs_information'
-                                )::INTEGER AS needs_information_count
-                         FROM "Application_Verifications" verification
-                         JOIN "Applications" application
-                           ON application.application_id = verification.application_id
-                         JOIN "Students" student
-                           ON student.student_id = application.student_id
-                         JOIN "Funding_Programs" program
-                           ON program.program_id = application.program_id
-                         WHERE verification.verification_type = $1
-                           AND verification.status IN ('pending', 'needs_information')
-                           AND ${scopeColumn} = $2`,
-                        [verificationType, req.auth.scopeId]
-                    );
-                    return res.json({ summary: result.rows[0] });
-                }
-            );
-        }
-
-    createApp,
-            if (!await requireStaffSchema(res, { admin: role === "LGU Admin" })) return;
-    SESSION_COOKIE
-};
         app.patch(
             `${path}/:verificationId`,
             ...roleMiddleware,
@@ -2041,3 +2098,26 @@ module.exports = {
                 );
             }
         }
+    }
+
+    app.use((error, req, res, next) => {
+        if (res.headersSent) return next(error);
+        if (error instanceof SyntaxError && error.status === 400 && "body" in error) {
+            return res.status(400).json({ message: "Request body must be valid JSON." });
+        }
+        logger.error("Request failed", {
+            method: req.method,
+            path: req.path,
+            code: error.code,
+            name: error.name
+        });
+        return res.status(500).json({ message: "An internal error occurred." });
+    });
+
+    return app;
+}
+
+module.exports = {
+    createApp,
+    SESSION_COOKIE
+};
