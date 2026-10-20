@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const pool = require("./db");
 
-const DEMO_DEFAULT_PASSWORD = "GrantWise#2026!";
+const DEMO_DEFAULT_PASSWORD = process.env.DEMO_STAFF_PASSWORD || "";
 
 const SEED_PROGRAMS = [
     {
@@ -52,6 +52,11 @@ function slugify(value) {
 }
 
 async function seedOperationalData(dbPool = pool) {
+    if (DEMO_DEFAULT_PASSWORD.length < 12 || DEMO_DEFAULT_PASSWORD.length > 128) {
+        throw new Error(
+            "Set DEMO_STAFF_PASSWORD to a value between 12 and 128 characters before seeding demo staff accounts."
+        );
+    }
     const passwordHash = await argon2.hash(DEMO_DEFAULT_PASSWORD, {
         type: argon2.argon2id,
         memoryCost: 19456,

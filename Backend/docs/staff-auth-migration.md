@@ -8,6 +8,7 @@
    - Added to `"Roles"` (`ON CONFLICT (role_name) DO NOTHING`).
    - Never granted via public registration; requires the auditable developer bootstrap procedure (`Backend/scripts/bootstrap-developer.js`).
    - Can open active LGU Admin, Barangay Coordinator, and Registrar dashboards in read-only, scope-specific preview mode. Student portal access is not included.
+   - The bootstrap prompts for a developer password; seeded non-student demo accounts require a private `DEMO_STAFF_PASSWORD` value before running `npm run init-db`.
 2. **Normalized & Verified User Emails**:
    - Adds `email_verified_at TIMESTAMPTZ` to `"Users"`.
    - Enforces `chk_users_email_normalized` and `uq_users_lower_email` (`LOWER(BTRIM(email))`).

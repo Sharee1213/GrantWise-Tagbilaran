@@ -8,7 +8,6 @@ const DEFAULT_DEVELOPER_ALLOWLIST = Object.freeze([
     "medrina.nina_marie@hnu.edu.ph",
     "palaca.szarina@hnu.edu.ph"
 ]);
-
 function normalizeEmail(value) {
     return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
