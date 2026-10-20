@@ -43,10 +43,14 @@ CREATE TABLE IF NOT EXISTS "Users" (
         CHECK (email = LOWER(BTRIM(email)) AND POSITION(' ' IN email) = 0),
     password_hash TEXT NOT NULL,
     phone_number VARCHAR(30),
+    email_verified_at TIMESTAMPTZ,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE "Users"
+    ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_lower_email
     ON "Users" (LOWER(BTRIM(email)));
@@ -67,6 +71,7 @@ CREATE TABLE IF NOT EXISTS "LGU_Admins" (
     user_id INTEGER NOT NULL UNIQUE REFERENCES "Users"(user_id) ON DELETE CASCADE,
     funding_unit_id INTEGER REFERENCES "Funding_Units"(funding_unit_id),
     position_title VARCHAR(100),
+    permissions JSONB NOT NULL DEFAULT '{"read_only_reports": true, "program_management": true, "application_review": true, "award_approval": true, "disbursement_release": false}'::JSONB,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -74,6 +79,10 @@ CREATE TABLE IF NOT EXISTS "LGU_Admins" (
 ALTER TABLE "LGU_Admins"
     ADD COLUMN IF NOT EXISTS funding_unit_id INTEGER
         REFERENCES "Funding_Units"(funding_unit_id);
+
+ALTER TABLE "LGU_Admins"
+    ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL
+        DEFAULT '{"read_only_reports": true, "program_management": true, "application_review": true, "award_approval": true, "disbursement_release": false}'::JSONB;
 
 -- Existing admin rows remain nullable until explicitly mapped to a funding unit.
 CREATE TABLE IF NOT EXISTS "Barangay_Coordinators" (
@@ -1636,7 +1645,8 @@ VALUES
     ('LGU Admin', 'Local government scholarship administrator'),
     ('Barangay Coordinator', 'Barangay-linked coordinator for student verification and endorsements'),
     ('Registrar', 'School registrar responsible for validating student academic records'),
-    ('Scholar', 'Approved scholarship applicant or awardee')
+    ('Scholar', 'Approved scholarship applicant or awardee'),
+    ('System Admin', 'Developer or explicitly authorized system administrator for staff access and domain management')
 ON CONFLICT (role_name) DO NOTHING;
 
 INSERT INTO "Barangays" (barangay_name)
@@ -1666,5 +1676,98 @@ VALUES
     ('Tagbilaran City College'),
     ('PMI Colleges Main Branch')
 ON CONFLICT (school_name) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS "School_Email_Domains" (
+    domain_id SERIAL PRIMARY KEY,
+    school_id INTEGER NOT NULL REFERENCES "Schools"(school_id) ON DELETE CASCADE,
+    domain VARCHAR(253) NOT NULL UNIQUE
+        CHECK (domain = LOWER(BTRIM(domain)) AND POSITION(' ' IN domain) = 0 AND POSITION('@' IN domain) = 0),
+    domain_status VARCHAR(20) NOT NULL DEFAULT 'candidate'
+        CHECK (domain_status IN ('candidate', 'verified', 'disabled')),
+    is_primary BOOLEAN NOT NULL DEFAULT TRUE,
+    configured_by INTEGER REFERENCES "Users"(user_id),
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_school_email_domains_school
+    ON "School_Email_Domains" (school_id, domain_status);
+
+-- Seed initial school domain mappings using actual school names in "Schools"
+INSERT INTO "School_Email_Domains" (school_id, domain, domain_status, is_primary, notes)
+SELECT s.school_id, v.domain, v.domain_status, v.is_primary, v.notes
+FROM (
+    VALUES
+        ('Holy Name University', 'hnu.edu.ph', 'verified', TRUE, 'Configured official HNU institutional domain'),
+        ('BISU-Tagbilaran', 'bisu.edu.ph', 'verified', TRUE, 'Configured official BISU institutional domain'),
+        ('University of Bohol', 'universityofbohol.edu.ph', 'verified', TRUE, 'Configured official UB institutional domain'),
+        ('University of Bohol', 'ub.edu.ph', 'candidate', FALSE, 'Candidate short domain ub.edu.ph subject to confirmation by the institution'),
+        ('Tagbilaran City College', 'tagbilarancitycollege.edu.ph', 'verified', TRUE, 'Configured official TCC institutional domain'),
+        ('Tagbilaran City College', 'tcc.edu.ph', 'candidate', FALSE, 'Candidate short domain tcc.edu.ph subject to confirmation by the institution'),
+        ('PMI Colleges Main Branch', 'pmicollegesbohol.edu.ph', 'verified', TRUE, 'Configured official PMI Bohol institutional domain'),
+        ('PMI Colleges Main Branch', 'pmi-bohol.edu.ph', 'candidate', FALSE, 'Candidate domain pmi-bohol.edu.ph subject to confirmation by the institution')
+) AS v(school_name, domain, domain_status, is_primary, notes)
+JOIN "Schools" s ON s.school_name = v.school_name
+ON CONFLICT (domain) DO NOTHING;
+
+-- 5. Staff Email Authorizations and Invitations table
+CREATE TABLE IF NOT EXISTS "Staff_Email_Authorizations" (
+    authorization_id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL
+        CHECK (email = LOWER(BTRIM(email)) AND POSITION(' ' IN email) = 0),
+    role_name VARCHAR(50) NOT NULL
+        CHECK (role_name IN ('LGU Admin', 'Barangay Coordinator', 'Registrar')),
+    funding_unit_id INTEGER REFERENCES "Funding_Units"(funding_unit_id),
+    barangay_id INTEGER REFERENCES "Barangays"(barangay_id),
+    school_id INTEGER REFERENCES "Schools"(school_id),
+    position_title VARCHAR(100),
+    lgu_permissions JSONB,
+    invitation_token_hash TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'revoked', 'expired')),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '72 hours'),
+    authorized_by INTEGER REFERENCES "Users"(user_id),
+    authorized_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    activated_user_id INTEGER REFERENCES "Users"(user_id) ON DELETE SET NULL,
+    activated_at TIMESTAMPTZ,
+    revoked_by INTEGER REFERENCES "Users"(user_id),
+    revoked_at TIMESTAMPTZ,
+    revocation_reason TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_staff_email_authorization_scope CHECK (
+        (role_name = 'LGU Admin' AND funding_unit_id IS NOT NULL AND barangay_id IS NULL AND school_id IS NULL)
+        OR (role_name = 'Barangay Coordinator' AND barangay_id IS NOT NULL AND funding_unit_id IS NULL AND school_id IS NULL)
+        OR (role_name = 'Registrar' AND school_id IS NOT NULL AND funding_unit_id IS NULL AND barangay_id IS NULL)
+    )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_staff_auth_open_email
+    ON "Staff_Email_Authorizations" (LOWER(BTRIM(email)))
+    WHERE status IN ('pending', 'active');
+
+CREATE INDEX IF NOT EXISTS idx_staff_auth_token_hash
+    ON "Staff_Email_Authorizations" (invitation_token_hash)
+    WHERE status = 'pending' AND invitation_token_hash IS NOT NULL;
+
+-- 6. Email Verification Tokens table (for student school-email verification & developer bootstrap)
+CREATE TABLE IF NOT EXISTS "Email_Verification_Tokens" (
+    verification_token_id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES "Users"(user_id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL
+        CHECK (email = LOWER(BTRIM(email)) AND POSITION(' ' IN email) = 0),
+    purpose VARCHAR(40) NOT NULL
+        CHECK (purpose IN ('account_verification', 'staff_invitation', 'developer_bootstrap')),
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_lookup
+    ON "Email_Verification_Tokens" (LOWER(BTRIM(email)), purpose)
+    WHERE consumed_at IS NULL;
 
 COMMIT;

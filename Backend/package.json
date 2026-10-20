@@ -7,7 +7,8 @@
     "test": "node --test",
     "dev": "node --watch -r ./dev-env.js server.js",
     "start": "node server.js",
-    "init-db": "node init-database.js"
+    "init-db": "node init-database.js",
+    "bootstrap-developer": "node scripts/bootstrap-developer.js"
   },
   "keywords": [],
   "author": "",

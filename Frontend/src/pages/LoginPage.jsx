@@ -21,6 +21,7 @@ export function getPortalPathForRole(role, programId = null, dashboardPath = nul
       ? `/portal/student?programId=${encodeURIComponent(programId)}`
       : "/portal/student";
   }
+  if (role === "System Admin") return "/portal/system-admin";
   if (role === "LGU Admin") return "/portal/lgu-admin";
   if (role === "Barangay Coordinator") return "/portal/barangay-coordinator";
   if (role === "Registrar") return "/portal/school-registrar";
@@ -384,6 +385,9 @@ export default function LoginPage() {
       <div className="page-actions">
         <Link className="text-link" to="/signup">
           Create a student account
+        </Link>
+        <Link className="text-link" to="/staff-register">
+          Redeem a staff invitation
         </Link>
         <Link className="text-link" to="/portals">
           Explore role portals

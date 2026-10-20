@@ -8,6 +8,16 @@ const helmet = require("helmet");
 const { z } = require("zod");
 const defaultPool = require("./db");
 const { initDatabase } = require("./init-database");
+const {
+    DEFAULT_DEVELOPER_ALLOWLIST,
+    LGU_PERMISSION_CATEGORIES,
+    DEFAULT_LGU_PERMISSIONS,
+    PROPOSED_LGU_OFFICIALS_DIRECTORY,
+    PROPOSED_BARANGAY_COORDINATOR_DIRECTORY,
+    PROPOSED_SCHOOL_REGISTRAR_DIRECTORY,
+    DEFAULT_SCHOOL_DOMAIN_BY_ID
+} = require("./staff-directory-config");
+const { getAllowedDeveloperEmails } = require("./scripts/bootstrap-developer");
 
 const SESSION_COOKIE = "grantwise_session";
 const SESSION_DURATION_MS = 12 * 60 * 60 * 1000;
@@ -18,15 +28,21 @@ const ROLE_PORTAL_PATHS = Object.freeze({
     Scholar: "/portal/student",
     "LGU Admin": "/portal/lgu-admin",
     "Barangay Coordinator": "/portal/barangay-coordinator",
-    Registrar: "/portal/school-registrar"
+    Registrar: "/portal/school-registrar",
+    "System Admin": "/portal/system-admin"
 });
 
 const ROLE_SCOPE_TYPES = Object.freeze({
     Scholar: "student",
     "LGU Admin": "funding_unit",
     "Barangay Coordinator": "barangay",
-    Registrar: "school"
+    Registrar: "school",
+    "System Admin": "system"
 });
+
+const DEFAULT_APPROVED_SCHOOL_DOMAINS = new Set(
+    Object.values(DEFAULT_SCHOOL_DOMAIN_BY_ID)
+);
 
 const PERSONAL_GMAIL_DOMAINS = new Set(["gmail.com"]);
 const PERSONAL_CONSUMER_DOMAINS = new Set([
@@ -124,8 +140,11 @@ function getEmailPolicyConfig(env = process.env) {
     const barangayDomains = parseConfiguredDomainSet(
         env.ALLOWED_BARANGAY_EMAIL_DOMAINS || env.BARANGAY_EMAIL_DOMAINS
     );
+    const developerAllowlist = new Set(getAllowedDeveloperEmails(env));
     const strictSchoolDomainAllowlist =
         env.STRICT_SCHOOL_DOMAIN_ALLOWLIST === "true";
+    const requireStudentSchoolEmail =
+        env.REQUIRE_STUDENT_SCHOOL_EMAIL === "true";
     const emailVerificationEnabled = Boolean(
         env.EMAIL_VERIFICATION_ENABLED === "true" &&
         env.SMTP_HOST &&
@@ -136,9 +155,22 @@ function getEmailPolicyConfig(env = process.env) {
         schoolDomains,
         lguDomains,
         barangayDomains,
+        developerAllowlist,
         strictSchoolDomainAllowlist,
+        requireStudentSchoolEmail,
         emailVerificationEnabled
     };
+}
+
+function normalizeDomainList(schoolDomainFromDb) {
+    if (!schoolDomainFromDb) return [];
+    const list = Array.isArray(schoolDomainFromDb)
+        ? schoolDomainFromDb
+        : [schoolDomainFromDb];
+    return list
+        .filter((item) => typeof item === "string")
+        .map((item) => item.trim().toLowerCase().replace(/^@+/, ""))
+        .filter(Boolean);
 }
 
 function isOfficialSchoolEmailDomain(domain, policyConfig, schoolDomainFromDb = null) {
@@ -152,17 +184,9 @@ function isOfficialSchoolEmailDomain(domain, policyConfig, schoolDomainFromDb = 
         return false;
     }
 
-    if (schoolDomainFromDb) {
-        const normalizedSchoolDomain = schoolDomainFromDb
-            .trim()
-            .toLowerCase()
-            .replace(/^@+/, "");
-        if (normalizedSchoolDomain) {
-            return (
-                domain === normalizedSchoolDomain ||
-                domain.endsWith(`.${normalizedSchoolDomain}`)
-            );
-        }
+    const explicitSchoolDomains = normalizeDomainList(schoolDomainFromDb);
+    if (explicitSchoolDomains.length > 0) {
+        return matchesDomainSet(domain, new Set(explicitSchoolDomains));
     }
 
     if (policyConfig.schoolDomains.size > 0) {
@@ -174,10 +198,7 @@ function isOfficialSchoolEmailDomain(domain, policyConfig, schoolDomainFromDb = 
         }
     }
 
-    return (
-        (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
-        (domain.endsWith(".edu") && domain.length > ".edu".length)
-    );
+    return matchesDomainSet(domain, DEFAULT_APPROVED_SCHOOL_DOMAINS);
 }
 
 function isOfficialLguEmailDomain(domain, policyConfig) {
@@ -229,17 +250,40 @@ function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig()
 
     const { domain, normalized } = parsed;
 
-    if (role === "Scholar") {
-        if (
-            PERSONAL_GMAIL_DOMAINS.has(domain) ||
-            isOfficialSchoolEmailDomain(domain, policyConfig, options.schoolDomain)
-        ) {
+    if (role === "System Admin") {
+        const allowlist = policyConfig.developerAllowlist || new Set(DEFAULT_DEVELOPER_ALLOWLIST);
+        if (allowlist.has(normalized)) {
             return { valid: true, normalizedEmail: normalized, domain };
         }
         return {
             valid: false,
             message:
-                "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address."
+                "System Admin accounts must use an email address on the configured developer allowlist and complete verified bootstrap."
+        };
+    }
+
+    if (role === "Scholar") {
+        const allowGmail =
+            !options.requireSchoolEmail && !policyConfig.requireStudentSchoolEmail;
+        if (
+            (allowGmail && PERSONAL_GMAIL_DOMAINS.has(domain)) ||
+            isOfficialSchoolEmailDomain(domain, policyConfig, options.schoolDomain)
+        ) {
+            return { valid: true, normalizedEmail: normalized, domain };
+        }
+        if (options.schoolDomain && !PERSONAL_GMAIL_DOMAINS.has(domain)) {
+            const expectedDomains = normalizeDomainList(options.schoolDomain);
+            return {
+                valid: false,
+                message: expectedDomains.length > 0
+                    ? `The email domain (@${domain}) does not match the official domain (${expectedDomains.map((d) => `@${d}`).join(", ")}) configured for the selected school.`
+                    : "Students must register using a personal Gmail address (@gmail.com) or an approved official school-issued email address."
+            };
+        }
+        return {
+            valid: false,
+            message:
+                "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address from an approved partner institution."
         };
     }
 
@@ -256,6 +300,9 @@ function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig()
                 message:
                     "LGU Program Admin accounts must use an official LGU-issued email address. Personal Gmail, consumer, and school email addresses are not permitted."
             };
+        }
+        if (options.isDeveloperAuthorized) {
+            return { valid: true, normalizedEmail: normalized, domain };
         }
         if (options.requireConfiguredLguDomain && policyConfig.lguDomains.size === 0) {
             return {
@@ -277,6 +324,7 @@ function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig()
 
     if (role === "Barangay Coordinator") {
         if (
+            options.isDeveloperAuthorized ||
             PERSONAL_GMAIL_DOMAINS.has(domain) ||
             isOfficialBarangayOrLguEmailDomain(domain, policyConfig)
         ) {
@@ -290,7 +338,20 @@ function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig()
     }
 
     if (role === "Registrar") {
+        const expectedDomains = normalizeDomainList(options.schoolDomain);
+        if (expectedDomains.length > 0) {
+            if (matchesDomainSet(domain, new Set(expectedDomains))) {
+                return { valid: true, normalizedEmail: normalized, domain };
+            }
+            if (!options.allowGmailRegistrar || !PERSONAL_GMAIL_DOMAINS.has(domain)) {
+                return {
+                    valid: false,
+                    message: `Registrar email domain (@${domain}) must match the assigned school's verified domain (${expectedDomains.map((d) => `@${d}`).join(", ")}).`
+                };
+            }
+        }
         if (
+            options.isDeveloperAuthorized ||
             PERSONAL_GMAIL_DOMAINS.has(domain) ||
             isOfficialSchoolEmailDomain(domain, policyConfig, options.schoolDomain)
         ) {
@@ -500,8 +561,173 @@ const eligibilityCheckSchema = z.object({
     remarks: z.string().trim().max(2000).optional().nullable()
 }).strict();
 
+const lguPermissionsSchema = z.object({
+    read_only_reports: z.boolean(),
+    program_management: z.boolean(),
+    application_review: z.boolean(),
+    award_approval: z.boolean(),
+    disbursement_release: z.boolean()
+}).strict();
+
+const staffAuthorizationCreateSchema = z.object({
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
+    role: z.enum(["LGU Admin", "Barangay Coordinator", "Registrar"], {
+        required_error: "Select an authorized staff role."
+    }),
+    fundingUnitId: z.number().int().positive().optional().nullable(),
+    barangayId: z.number().int().positive().optional().nullable(),
+    schoolId: z.number().int().positive().optional().nullable(),
+    positionTitle: z.string().trim().min(1).max(100).optional().nullable(),
+    lguPermissions: lguPermissionsSchema.optional().nullable(),
+    expiresInHours: z.number().int().min(1).max(720).optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable()
+}).strict();
+
+const staffAuthorizationRevokeSchema = z.object({
+    reason: z.string().trim().max(500).optional().nullable()
+}).strict();
+
+const staffInvitationInspectSchema = z.object({
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
+    invitationToken: z.string({ required_error: "Invitation token is required." })
+        .trim()
+        .min(16, "Invitation token is invalid.")
+        .max(256, "Invitation token is invalid.")
+}).strict();
+
+const staffInvitationRegisterSchema = z.object({
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
+    invitationToken: z.string({ required_error: "Invitation token is required." })
+        .trim()
+        .min(16, "Invitation token is invalid.")
+        .max(256, "Invitation token is invalid."),
+    firstName: z.string({ required_error: "First name is required." })
+        .trim()
+        .min(1, "First name is required.")
+        .max(100, "First name must be 100 characters or fewer."),
+    lastName: z.string({ required_error: "Last name is required." })
+        .trim()
+        .min(1, "Last name is required.")
+        .max(100, "Last name must be 100 characters or fewer."),
+    phoneNumber: z.string()
+        .trim()
+        .max(30, "Phone number must be 30 characters or fewer.")
+        .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+        .optional()
+        .nullable(),
+    password: z.string({ required_error: "Password is required." })
+        .min(12, "Password must be at least 12 characters long.")
+        .max(128, "Password must be 128 characters or fewer.")
+        .refine((value) => value.trim().length > 0, {
+            message: "Password cannot contain only whitespace."
+        })
+}).strict();
+
+const schoolDomainCreateSchema = z.object({
+    schoolId: z.number().int().positive().optional().nullable(),
+    schoolName: z.string().trim().min(2).max(150).optional().nullable(),
+    domain: z.string()
+        .trim()
+        .max(253)
+        .transform((value) => value.toLowerCase().replace(/^@+/, ""))
+        .refine((value) => {
+            if (!value) return true;
+            const parsed = parseEmailAddress(`check@${value}`);
+            return Boolean(parsed && !PERSONAL_CONSUMER_DOMAINS.has(value));
+        }, "Enter a valid institutional email domain (non-consumer).")
+        .optional()
+        .nullable(),
+    domainStatus: z.enum(["verified", "candidate", "disabled"]).optional(),
+    isPrimary: z.boolean().optional(),
+    notes: z.string().trim().max(500).optional().nullable()
+}).strict();
+
+const schoolDomainUpdateSchema = z.object({
+    domain: z.string()
+        .trim()
+        .min(3)
+        .max(253)
+        .transform((value) => value.toLowerCase().replace(/^@+/, ""))
+        .refine((value) => {
+            const parsed = parseEmailAddress(`check@${value}`);
+            return Boolean(parsed && !PERSONAL_CONSUMER_DOMAINS.has(value));
+        }, "Enter a valid institutional email domain (non-consumer).")
+        .optional(),
+    domainStatus: z.enum(["verified", "candidate", "disabled"]).optional(),
+    isPrimary: z.boolean().optional(),
+    notes: z.string().trim().max(500).optional().nullable()
+}).strict().refine(
+    (value) => Object.keys(value).length > 0,
+    { message: "At least one school domain field is required." }
+);
+
+const studentEmailVerifySchema = z.object({
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        }),
+    verificationToken: z.string({ required_error: "Verification token is required." })
+        .trim()
+        .min(16, "Verification token is invalid.")
+        .max(256, "Verification token is invalid.")
+}).strict();
+
+const studentEmailResendSchema = z.object({
+    email: z.string({ required_error: "Email address is required." })
+        .trim()
+        .min(1, "Email address is required.")
+        .max(255, "Email address must be 255 characters or fewer.")
+        .transform((value) => normalizeEmail(value))
+        .refine((value) => Boolean(parseEmailAddress(value)), {
+            message: "Enter a valid email address."
+        })
+}).strict();
+
 function tokenHash(token) {
     return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function verifyHashMatch(candidateToken, expectedHashHex) {
+    if (!candidateToken || !expectedHashHex || typeof expectedHashHex !== "string") {
+        return false;
+    }
+    const candidateHex = tokenHash(String(candidateToken).trim());
+    if (candidateHex.length !== expectedHashHex.length) {
+        return false;
+    }
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(candidateHex, "hex"),
+            Buffer.from(expectedHashHex, "hex")
+        );
+    } catch {
+        return false;
+    }
 }
 
 function getAllowedOrigins(env) {
@@ -597,7 +823,25 @@ async function getSchemaCapabilities(pool) {
                   'trg_validate_lgu_admin_funding_unit',
                   'trg_validate_award_status_transition'
               )
-            ) AS has_staff_admin_workflow`
+            ) AS has_staff_admin_workflow,
+            to_regclass('"Staff_Email_Authorizations"') IS NOT NULL
+            AS has_staff_authorizations,
+            to_regclass('"School_Email_Domains"') IS NOT NULL
+            AS has_school_email_domains,
+            to_regclass('"Email_Verification_Tokens"') IS NOT NULL
+            AS has_email_verification_tokens,
+            EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'Users'
+                  AND column_name = 'email_verified_at'
+            ) AS has_user_email_verified_at,
+            EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'LGU_Admins'
+                  AND column_name = 'permissions'
+            ) AS has_lgu_admin_permissions`
     );
     const capabilities = result.rows[0];
     return {
@@ -608,6 +852,11 @@ async function getSchemaCapabilities(pool) {
         hasProgramBudgetBalances: capabilities.has_program_budget_balances,
         hasAwardApprovalFunction: capabilities.has_award_approval_function,
         hasStaffAdminWorkflow: capabilities.has_staff_admin_workflow,
+        hasStaffAuthorizations: Boolean(capabilities.has_staff_authorizations),
+        hasSchoolEmailDomains: Boolean(capabilities.has_school_email_domains),
+        hasEmailVerificationTokens: Boolean(capabilities.has_email_verification_tokens),
+        hasUserEmailVerifiedAt: Boolean(capabilities.has_user_email_verified_at),
+        hasLguAdminPermissions: Boolean(capabilities.has_lgu_admin_permissions),
         adminPortalEnabled:
             capabilities.relational_program_schema &&
             capabilities.application_workflow_schema &&
@@ -798,6 +1047,18 @@ function createApp({
             }
 
             const data = input.data;
+            if (emailPolicyConfig.developerAllowlist.has(data.email)) {
+                return res.status(403).json({
+                    message:
+                        "This email address is listed in the developer configuration directory and cannot be activated through public student registration. Complete the verified developer bootstrap procedure instead.",
+                    errors: [{
+                        field: "email",
+                        message:
+                            "Developer allowlist email addresses cannot be registered publicly."
+                    }]
+                });
+            }
+
             const studentEmailPolicy = validateEmailForRole(
                 data.email,
                 "Scholar",
@@ -885,7 +1146,11 @@ function createApp({
                     });
                 }
 
-                const schoolEmailDomain = approvedSchool.rows[0]?.email_domain || null;
+                const schoolEmailDomain =
+                    approvedSchool.rows[0]?.email_domain ||
+                    approvedSchool.rows[0]?.verified_domains ||
+                    DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId] ||
+                    null;
                 if (schoolEmailDomain) {
                     const schoolSpecificEmailCheck = validateEmailForRole(
                         data.email,
@@ -972,6 +1237,507 @@ function createApp({
         });
     }
 
+    app.post("/api/auth/resend-verification", authRateLimit, async (req, res, next) => {
+        const input = studentEmailResendSchema.safeParse(req.body);
+        if (!input.success) {
+            return res.status(400).json({
+                message: "Email verification request is invalid.",
+                errors: input.error.issues.map(({ path, message }) => ({
+                    field: path.join(".") || "email",
+                    message
+                }))
+            });
+        }
+        try {
+            const capabilities = await getSchemaCapabilities(pool);
+            if (!capabilities.hasEmailVerificationTokens) {
+                return res.status(503).json({
+                    message: "The email verification token schema is not installed."
+                });
+            }
+            const userResult = await pool.query(
+                `SELECT user_id, email, email_verified_at
+                 FROM "Users"
+                 WHERE lower(email) = $1 AND is_active = TRUE
+                 LIMIT 1`,
+                [input.data.email]
+            );
+            if (userResult.rowCount === 0) {
+                return res.status(404).json({
+                    message: "No active account was found for that email address."
+                });
+            }
+            const user = userResult.rows[0];
+            if (user.email_verified_at) {
+                return res.status(409).json({
+                    message: "This email address has already been verified."
+                });
+            }
+            const rawVerificationToken = crypto.randomBytes(32).toString("base64url");
+            await pool.query(
+                `INSERT INTO "Email_Verification_Tokens" (
+                    user_id, email, token_hash, purpose, expires_at
+                 ) VALUES ($1, $2, $3, 'account_verification', NOW() + INTERVAL '24 hours')`,
+                [user.user_id, normalizeEmail(user.email), tokenHash(rawVerificationToken)]
+            );
+            return res.status(201).json({
+                message: emailPolicyConfig.emailVerificationEnabled
+                    ? "Verification token generated for email delivery."
+                    : "Verification token generated. Automated SMTP delivery is currently disabled; use the verification code below in development/test mode.",
+                emailVerification: {
+                    email: normalizeEmail(user.email),
+                    enabled: emailPolicyConfig.emailVerificationEnabled,
+                    verified: false,
+                    verificationEmailSent: false,
+                    ...(allowDevelopmentRoutes || env.NODE_ENV === "test"
+                        ? { verificationToken: rawVerificationToken }
+                        : {})
+                }
+            });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.post("/api/auth/verify-email", authRateLimit, async (req, res, next) => {
+        const input = studentEmailVerifySchema.safeParse(req.body);
+        if (!input.success) {
+            return res.status(400).json({
+                message: "Email verification details are invalid.",
+                errors: input.error.issues.map(({ path, message }) => ({
+                    field: path.join("."),
+                    message
+                }))
+            });
+        }
+        let capabilities;
+        try {
+            capabilities = await getSchemaCapabilities(pool);
+        } catch (error) {
+            return next(error);
+        }
+        if (!capabilities.hasEmailVerificationTokens) {
+            return res.status(503).json({
+                message: "The email verification token schema is not installed."
+            });
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query("BEGIN");
+            const tokenRow = await client.query(
+                `SELECT verification_token_id, user_id, email, token_hash,
+                        expires_at, consumed_at
+                 FROM "Email_Verification_Tokens"
+                 WHERE lower(email) = $1
+                   AND purpose = 'account_verification'
+                 ORDER BY created_at DESC, verification_token_id DESC
+                 LIMIT 1
+                 FOR UPDATE`,
+                [input.data.email]
+            );
+            if (tokenRow.rowCount === 0) {
+                await client.query("ROLLBACK");
+                return res.status(403).json({
+                    message: "Verification token is invalid or has expired."
+                });
+            }
+            const record = tokenRow.rows[0];
+            if (
+                record.consumed_at ||
+                new Date(record.expires_at).getTime() <= Date.now() ||
+                !verifyHashMatch(input.data.verificationToken, record.token_hash)
+            ) {
+                await client.query("ROLLBACK");
+                return res.status(403).json({
+                    message: "Verification token is invalid or has expired."
+                });
+            }
+
+            await client.query(
+                `UPDATE "Email_Verification_Tokens"
+                 SET consumed_at = NOW()
+                 WHERE verification_token_id = $1`,
+                [record.verification_token_id]
+            );
+            await client.query(
+                `UPDATE "Users"
+                 SET email_verified_at = NOW()
+                 WHERE user_id = $1`,
+                [record.user_id]
+            );
+            await client.query(
+                `INSERT INTO "Audit_Logs" (
+                    user_id, action_type, entity_type, entity_id, details
+                 ) VALUES ($1, 'student_email_verified', 'Users', $1,
+                           jsonb_build_object(
+                               'email', $2::TEXT,
+                               'enrollment_verified', FALSE
+                           ))`,
+                [record.user_id, input.data.email]
+            );
+            await client.query("COMMIT");
+            return res.json({
+                message:
+                    "Email ownership verified. Note: School Registrar enrollment and academic eligibility verification remain required for scholarship applications.",
+                emailVerification: {
+                    email: input.data.email,
+                    verified: true,
+                    enrollmentVerified: false
+                }
+            });
+        } catch (error) {
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackError) {
+                logger.error("Email verification rollback failed", {
+                    code: rollbackError.code
+                });
+            }
+            return next(error);
+        } finally {
+            client.release();
+        }
+    });
+
+    app.post("/api/auth/staff-invitations/inspect", authRateLimit, async (req, res, next) => {
+        const input = staffInvitationInspectSchema.safeParse(req.body);
+        if (!input.success) {
+            return res.status(400).json({
+                message: "Invitation details are invalid.",
+                errors: input.error.issues.map(({ path, message }) => ({
+                    field: path.join("."),
+                    message
+                }))
+            });
+        }
+        try {
+            const capabilities = await getSchemaCapabilities(pool);
+            if (!capabilities.hasStaffAuthorizations) {
+                return res.status(503).json({
+                    message: "The staff authorization schema is not installed."
+                });
+            }
+            const result = await pool.query(
+                `SELECT sa.authorization_id, sa.email, sa.role_name,
+                        sa.funding_unit_id, unit.funding_unit_name,
+                        sa.barangay_id, barangay.barangay_name,
+                        sa.school_id, school.school_name,
+                        sa.position_title, sa.invitation_token_hash,
+                        sa.status, sa.expires_at
+                 FROM "Staff_Email_Authorizations" sa
+                 LEFT JOIN "Funding_Units" unit ON unit.funding_unit_id = sa.funding_unit_id
+                 LEFT JOIN "Barangays" barangay ON barangay.barangay_id = sa.barangay_id
+                 LEFT JOIN "Schools" school ON school.school_id = sa.school_id
+                 WHERE lower(sa.email) = $1
+                 ORDER BY sa.updated_at DESC, sa.authorization_id DESC
+                 LIMIT 1`,
+                [input.data.email]
+            );
+            if (result.rowCount === 0) {
+                return res.status(403).json({
+                    message: "This email address does not have a staff invitation."
+                });
+            }
+            const inv = result.rows[0];
+            if (inv.status === "revoked") {
+                return res.status(403).json({
+                    message: "This staff authorization has been revoked."
+                });
+            }
+            if (inv.status === "active") {
+                return res.status(409).json({
+                    message: "This staff invitation has already been activated."
+                });
+            }
+            if (
+                inv.status === "expired" ||
+                (inv.expires_at && new Date(inv.expires_at).getTime() <= Date.now())
+            ) {
+                return res.status(403).json({
+                    message: "This staff invitation has expired."
+                });
+            }
+            if (!verifyHashMatch(input.data.invitationToken, inv.invitation_token_hash)) {
+                return res.status(403).json({
+                    message: "Invalid staff invitation token."
+                });
+            }
+            const scopeId =
+                inv.role_name === "LGU Admin"
+                    ? inv.funding_unit_id
+                    : inv.role_name === "Barangay Coordinator"
+                        ? inv.barangay_id
+                        : inv.school_id;
+            const scopeName =
+                inv.role_name === "LGU Admin"
+                    ? inv.funding_unit_name
+                    : inv.role_name === "Barangay Coordinator"
+                        ? inv.barangay_name
+                        : inv.school_name;
+            return res.json({
+                valid: true,
+                invitation: {
+                    authorizationId: inv.authorization_id,
+                    email: normalizeEmail(inv.email),
+                    role: inv.role_name,
+                    scopeType: ROLE_SCOPE_TYPES[inv.role_name],
+                    scopeId,
+                    scopeName: scopeName || `Scope #${scopeId}`,
+                    positionTitle: inv.position_title,
+                    expiresAt: inv.expires_at
+                }
+            });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.post("/api/auth/staff-register", authRateLimit, async (req, res, next) => {
+        const input = staffInvitationRegisterSchema.safeParse(req.body);
+        if (!input.success) {
+            return res.status(400).json({
+                message: "Staff registration details are invalid.",
+                errors: input.error.issues.map(({ path, message }) => ({
+                    field: path.join("."),
+                    message
+                }))
+            });
+        }
+
+        let capabilities;
+        try {
+            capabilities = await getSchemaCapabilities(pool);
+        } catch (error) {
+            return next(error);
+        }
+        if (!capabilities.hasStaffAuthorizations) {
+            return res.status(503).json({
+                message: "The staff authorization schema is not installed."
+            });
+        }
+
+        const data = input.data;
+        const passwordHash = await argon2.hash(data.password, {
+            type: argon2.argon2id,
+            memoryCost: 19456,
+            timeCost: 2,
+            parallelism: 1
+        });
+        const client = await pool.connect();
+
+        try {
+            await client.query("BEGIN");
+            await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+                data.email
+            ]);
+
+            const authResult = await client.query(
+                `SELECT sa.authorization_id, sa.email, sa.role_name,
+                        sa.funding_unit_id, sa.barangay_id, sa.school_id,
+                        sa.position_title, sa.lgu_permissions,
+                        sa.invitation_token_hash, sa.status, sa.expires_at
+                 FROM "Staff_Email_Authorizations" sa
+                 WHERE lower(sa.email) = $1
+                 ORDER BY sa.updated_at DESC, sa.authorization_id DESC
+                 LIMIT 1
+                 FOR UPDATE`,
+                [data.email]
+            );
+            if (authResult.rowCount === 0) {
+                await client.query("ROLLBACK");
+                return res.status(403).json({
+                    message: "This email address is not authorized on the staff allowlist."
+                });
+            }
+
+            const authRow = authResult.rows[0];
+            if (authRow.status === "revoked") {
+                await client.query("ROLLBACK");
+                return res.status(403).json({
+                    message: "This staff authorization has been revoked."
+                });
+            }
+            if (authRow.status === "active") {
+                await client.query("ROLLBACK");
+                return res.status(409).json({
+                    message: "This staff invitation has already been activated."
+                });
+            }
+            if (
+                authRow.status === "expired" ||
+                (authRow.expires_at && new Date(authRow.expires_at).getTime() <= Date.now())
+            ) {
+                await client.query(
+                    `UPDATE "Staff_Email_Authorizations"
+                     SET status = 'expired', updated_at = NOW()
+                     WHERE authorization_id = $1`,
+                    [authRow.authorization_id]
+                );
+                await client.query("COMMIT");
+                return res.status(403).json({
+                    message: "This staff invitation has expired."
+                });
+            }
+            if (!verifyHashMatch(data.invitationToken, authRow.invitation_token_hash)) {
+                await client.query("ROLLBACK");
+                return res.status(403).json({
+                    message: "Invalid staff invitation token."
+                });
+            }
+
+            const existingUser = await client.query(
+                'SELECT 1 FROM "Users" WHERE lower(email) = $1 LIMIT 1',
+                [data.email]
+            );
+            if (existingUser.rowCount > 0) {
+                await client.query("ROLLBACK");
+                return res.status(409).json({
+                    message: "An account with this email address already exists."
+                });
+            }
+
+            const roleRow = await client.query(
+                'SELECT role_id FROM "Roles" WHERE role_name = $1',
+                [authRow.role_name]
+            );
+            if (roleRow.rowCount !== 1) {
+                throw new Error(`The ${authRow.role_name} role is not configured.`);
+            }
+
+            const userBarangayId =
+                authRow.role_name === "Barangay Coordinator" ? authRow.barangay_id : null;
+            const createdUser = await client.query(
+                `INSERT INTO "Users" (
+                    role_id, barangay_id, first_name, last_name, email,
+                    password_hash, phone_number, email_verified_at
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+                 RETURNING user_id`,
+                [
+                    roleRow.rows[0].role_id,
+                    userBarangayId,
+                    data.firstName,
+                    data.lastName,
+                    data.email,
+                    passwordHash,
+                    data.phoneNumber || null
+                ]
+            );
+            const newUserId = createdUser.rows[0].user_id;
+
+            let targetScopeId = null;
+            if (authRow.role_name === "LGU Admin") {
+                targetScopeId = authRow.funding_unit_id;
+                const resolvedPermissions = {
+                    ...DEFAULT_LGU_PERMISSIONS,
+                    ...(authRow.lgu_permissions && typeof authRow.lgu_permissions === "object"
+                        ? authRow.lgu_permissions
+                        : {})
+                };
+                await client.query(
+                    `INSERT INTO "LGU_Admins" (
+                        user_id, funding_unit_id, position_title, permissions, is_active
+                     ) VALUES ($1, $2, $3, $4::JSONB, TRUE)`,
+                    [
+                        newUserId,
+                        targetScopeId,
+                        authRow.position_title || "Scholarship Program Officer",
+                        JSON.stringify(resolvedPermissions)
+                    ]
+                );
+            } else if (authRow.role_name === "Barangay Coordinator") {
+                targetScopeId = authRow.barangay_id;
+                await client.query(
+                    `INSERT INTO "Barangay_Coordinators" (
+                        user_id, barangay_id, position_title, term_start, is_current
+                     ) VALUES ($1, $2, $3, CURRENT_DATE, TRUE)`,
+                    [
+                        newUserId,
+                        targetScopeId,
+                        authRow.position_title || "Barangay Scholarship Coordinator"
+                    ]
+                );
+            } else if (authRow.role_name === "Registrar") {
+                targetScopeId = authRow.school_id;
+                await client.query(
+                    `INSERT INTO "Registrars" (
+                        user_id, school_id, position_title, is_active
+                     ) VALUES ($1, $2, $3, TRUE)`,
+                    [
+                        newUserId,
+                        targetScopeId,
+                        authRow.position_title || "School Registrar"
+                    ]
+                );
+            }
+
+            await client.query(
+                `UPDATE "Staff_Email_Authorizations"
+                 SET status = 'active',
+                     activated_user_id = $1,
+                     activated_at = NOW(),
+                     invitation_token_hash = NULL,
+                     updated_at = NOW()
+                 WHERE authorization_id = $2`,
+                [newUserId, authRow.authorization_id]
+            );
+
+            await client.query(
+                `INSERT INTO "Audit_Logs" (
+                    user_id, action_type, entity_type, entity_id, details
+                 ) VALUES ($1, 'staff_invitation_redeemed', 'Staff_Email_Authorizations', $2,
+                           jsonb_build_object(
+                               'email', $3::TEXT,
+                               'role_name', $4::TEXT,
+                               'scope_id', $5::INTEGER
+                           ))`,
+                [
+                    newUserId,
+                    authRow.authorization_id,
+                    data.email,
+                    authRow.role_name,
+                    targetScopeId
+                ]
+            );
+
+            await client.query("COMMIT");
+            return res.status(201).json({
+                message: "Staff account verified and activated. Sign in to access your portal.",
+                staffAccount: {
+                    userId: newUserId,
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    email: data.email,
+                    role: authRow.role_name,
+                    scopeId: targetScopeId,
+                    scopeType: ROLE_SCOPE_TYPES[authRow.role_name],
+                    dashboardPath: ROLE_PORTAL_PATHS[authRow.role_name]
+                },
+                emailVerification: {
+                    enabled: emailPolicyConfig.emailVerificationEnabled,
+                    verified: true,
+                    verificationEmailSent: false
+                }
+            });
+        } catch (error) {
+            try {
+                await client.query("ROLLBACK");
+            } catch (rollbackError) {
+                logger.error("Staff registration rollback failed", {
+                    code: rollbackError.code
+                });
+            }
+            if (error.code === "23505") {
+                return res.status(409).json({
+                    message: "An account or active role assignment already exists for this staff member."
+                });
+            }
+            return next(error);
+        } finally {
+            client.release();
+        }
+    });
+
     app.post("/api/auth/login", authRateLimit, async (req, res) => {
         const input = loginSchema.safeParse(req.body);
         if (!input.success) {
@@ -986,9 +1752,24 @@ function createApp({
 
         const result = await pool.query(
             `SELECT u.user_id, u.first_name, u.last_name, u.email,
-                    u.password_hash, u.is_active, r.role_name
+                    u.password_hash, u.is_active, r.role_name,
+                    student.student_id,
+                    admin.funding_unit_id,
+                    coordinator.barangay_id AS coordinator_barangay_id,
+                    registrar.school_id AS registrar_school_id
              FROM "Users" u
              JOIN "Roles" r ON r.role_id = u.role_id
+             LEFT JOIN "Students" student
+               ON student.user_id = u.user_id AND student.is_active = TRUE
+             LEFT JOIN "LGU_Admins" admin
+               ON admin.user_id = u.user_id AND admin.is_active = TRUE
+             LEFT JOIN "Barangay_Coordinators" coordinator
+               ON coordinator.user_id = u.user_id
+              AND coordinator.is_current = TRUE
+              AND coordinator.term_start <= CURRENT_DATE
+              AND (coordinator.term_end IS NULL OR coordinator.term_end >= CURRENT_DATE)
+             LEFT JOIN "Registrars" registrar
+               ON registrar.user_id = u.user_id AND registrar.is_active = TRUE
              WHERE lower(u.email) = $1
              LIMIT 1`,
             [input.data.email]
@@ -1021,10 +1802,29 @@ function createApp({
             });
         }
 
+        if (user.staff_auth_status === "revoked") {
+            return res.status(403).json({
+                message: "This staff authorization has been revoked."
+            });
+        }
+        if (
+            user.staff_auth_status === "pending" ||
+            user.staff_auth_status === "expired" ||
+            user.staff_auth_status === "unauthorized"
+        ) {
+            return res.status(403).json({
+                message: "This staff account does not have an active developer authorization."
+            });
+        }
+
         const roleEmailCheck = validateEmailForRole(
             user.email,
             user.role_name,
-            emailPolicyConfig
+            emailPolicyConfig,
+            {
+                isDeveloperAuthorized: user.staff_auth_status === "active",
+                schoolDomain: user.verified_school_domains || null
+            }
         );
         if (!roleEmailCheck.valid) {
             return res.status(403).json({
@@ -1047,6 +1847,8 @@ function createApp({
             user.registrar_school_id !== undefined
         ) {
             resolvedScopeId = user.registrar_school_id;
+        } else if (user.role_name === "System Admin") {
+            resolvedScopeId = user.user_id;
         }
 
         const token = crypto.randomBytes(32).toString("base64url");
@@ -1069,7 +1871,7 @@ function createApp({
             },
             emailVerification: {
                 enabled: emailPolicyConfig.emailVerificationEnabled,
-                verified: false
+                verified: Boolean(user.email_verified_at)
             }
         });
     });
@@ -1085,13 +1887,34 @@ function createApp({
             const adminFundingUnit = capabilities.hasAdminFundingUnitAssignment
                 ? "admin.funding_unit_id"
                 : "NULL::INTEGER";
+            const extraSelects = [];
+            if (capabilities.hasUserEmailVerifiedAt) {
+                extraSelects.push("u.email_verified_at");
+            }
+            if (capabilities.hasLguAdminPermissions) {
+                extraSelects.push("admin.permissions AS lgu_permissions");
+            }
+            if (capabilities.hasStaffAuthorizations) {
+                extraSelects.push("staff_auth.status AS staff_auth_status");
+            }
+            const extraSelectClause =
+                extraSelects.length > 0 ? `,\n                        ${extraSelects.join(",\n                        ")}` : "";
+            const staffAuthJoin = capabilities.hasStaffAuthorizations
+                ? `\n                 LEFT JOIN LATERAL (
+                     SELECT sa.status
+                     FROM "Staff_Email_Authorizations" sa
+                     WHERE lower(sa.email) = lower(u.email)
+                     ORDER BY sa.updated_at DESC, sa.authorization_id DESC
+                     LIMIT 1
+                 ) staff_auth ON TRUE`
+                : "";
             const result = await pool.query(
                 `SELECT u.user_id, u.first_name, u.last_name, u.email,
                         r.role_name,
                         student.student_id,
                         ${adminFundingUnit} AS funding_unit_id,
                         coordinator.barangay_id AS coordinator_barangay_id,
-                        registrar.school_id AS registrar_school_id
+                        registrar.school_id AS registrar_school_id${extraSelectClause}
                  FROM "Login_Sessions" session
                  JOIN "Users" u ON u.user_id = session.user_id
                  JOIN "Roles" r ON r.role_id = u.role_id
@@ -1105,7 +1928,7 @@ function createApp({
                   AND coordinator.term_start <= CURRENT_DATE
                   AND (coordinator.term_end IS NULL OR coordinator.term_end >= CURRENT_DATE)
                  LEFT JOIN "Registrars" registrar
-                   ON registrar.user_id = u.user_id AND registrar.is_active = TRUE
+                   ON registrar.user_id = u.user_id AND registrar.is_active = TRUE${staffAuthJoin}
                  WHERE session.token_hash = $1
                    AND session.revoked_at IS NULL
                    AND session.expires_at > NOW()
@@ -1120,6 +1943,18 @@ function createApp({
                 return res.status(401).json({ message: "Authentication is required." });
             }
 
+            if (
+                row.staff_auth_status === "revoked" ||
+                row.staff_auth_status === "expired" ||
+                row.staff_auth_status === "pending" ||
+                row.staff_auth_status === "unauthorized"
+            ) {
+                clearSessionCookie(res, secureCookies);
+                return res.status(403).json({
+                    message: "This staff authorization is no longer active."
+                });
+            }
+
             let scopeId = null;
             if (row.role_name === "Scholar") scopeId = row.student_id;
             if (row.role_name === "LGU Admin") scopeId = row.funding_unit_id;
@@ -1127,6 +1962,7 @@ function createApp({
                 scopeId = row.coordinator_barangay_id;
             }
             if (row.role_name === "Registrar") scopeId = row.registrar_school_id;
+            if (row.role_name === "System Admin") scopeId = row.user_id;
 
             if (!scopeId) {
                 if (
@@ -1145,13 +1981,27 @@ function createApp({
             const roleEmailCheck = validateEmailForRole(
                 row.email,
                 row.role_name,
-                emailPolicyConfig
+                emailPolicyConfig,
+                {
+                    isDeveloperAuthorized: row.staff_auth_status === "active",
+                    schoolDomain: row.verified_school_domains || null
+                }
             );
             if (!roleEmailCheck.valid) {
                 return res.status(403).json({
                     message: roleEmailCheck.message
                 });
             }
+
+            const lguPermissions =
+                row.role_name === "LGU Admin"
+                    ? {
+                        ...DEFAULT_LGU_PERMISSIONS,
+                        ...(row.lgu_permissions && typeof row.lgu_permissions === "object"
+                            ? row.lgu_permissions
+                            : {})
+                    }
+                    : null;
 
             req.auth = {
                 userId: row.user_id,
@@ -1161,7 +2011,9 @@ function createApp({
                 role: row.role_name,
                 scopeId,
                 scopeType: ROLE_SCOPE_TYPES[row.role_name] || null,
-                dashboardPath: ROLE_PORTAL_PATHS[row.role_name] || "/portals"
+                dashboardPath: ROLE_PORTAL_PATHS[row.role_name] || "/portals",
+                lguPermissions,
+                emailVerified: Boolean(row.email_verified_at)
             };
             return next();
         } catch (error) {
@@ -1173,6 +2025,21 @@ function createApp({
         return (req, res, next) => {
             if (!roles.includes(req.auth.role)) {
                 return res.status(403).json({ message: "This account is not authorized for this resource." });
+            }
+            return next();
+        };
+    }
+
+    function requireLguPermission(permissionKey) {
+        return (req, res, next) => {
+            if (req.auth.role !== "LGU Admin") {
+                return res.status(403).json({ message: "This account is not authorized for this resource." });
+            }
+            const perms = req.auth.lguPermissions || DEFAULT_LGU_PERMISSIONS;
+            if (!perms[permissionKey]) {
+                return res.status(403).json({
+                    message: `This LGU Admin account does not have the '${permissionKey}' permission for this action.`
+                });
             }
             return next();
         };
@@ -1231,6 +2098,7 @@ function createApp({
         "/api/admin/dashboard",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const result = await pool.query(
@@ -1269,6 +2137,7 @@ function createApp({
         "/api/admin/programs",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const page = parseStaffPage(req, res);
@@ -1311,6 +2180,7 @@ function createApp({
         "/api/admin/programs/:programId/barangay-allocations",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("program_management"),
         async (req, res, next) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const programId = parsePositiveId(req.params.programId, "Program ID", res);
@@ -1440,6 +2310,7 @@ function createApp({
         "/api/admin/programs/:programId",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const programId = parsePositiveId(req.params.programId, "Program ID", res);
@@ -1484,6 +2355,7 @@ function createApp({
         "/api/admin/programs",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("program_management"),
         async (req, res, next) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const input = programCreateSchema.safeParse(req.body);
@@ -1574,6 +2446,7 @@ function createApp({
         "/api/admin/funding-cycles",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const result = await pool.query(
@@ -1594,6 +2467,7 @@ function createApp({
         "/api/admin/programs/:programId",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("program_management"),
         async (req, res, next) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const programId = parsePositiveId(req.params.programId, "Program ID", res);
@@ -1667,6 +2541,7 @@ function createApp({
         "/api/admin/applications",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const page = parseStaffPage(req, res);
@@ -1698,6 +2573,7 @@ function createApp({
         "/api/admin/applications/:applicationId",
         requireAuthentication,
         requireRole("LGU Admin"),
+        requireLguPermission("read_only_reports"),
         async (req, res) => {
             if (!await requireStaffSchema(res, { admin: true })) return;
             const applicationId = parsePositiveId(
@@ -2008,11 +2884,14 @@ function createApp({
                 role: req.auth.role,
                 scopeId: req.auth.scopeId,
                 scopeType: req.auth.scopeType,
-                dashboardPath: req.auth.dashboardPath
+                dashboardPath: req.auth.dashboardPath,
+                ...(req.auth.lguPermissions
+                    ? { lguPermissions: req.auth.lguPermissions }
+                    : {})
             },
             emailVerification: {
                 enabled: emailPolicyConfig.emailVerificationEnabled,
-                verified: false
+                verified: Boolean(req.auth.emailVerified)
             }
         });
     });
@@ -2517,6 +3396,18 @@ function createApp({
                         }))
                     });
                 }
+                if (isAdmin) {
+                    const perms = req.auth.lguPermissions || DEFAULT_LGU_PERMISSIONS;
+                    const requiredPerm =
+                        input.data.status === "approved"
+                            ? "award_approval"
+                            : "application_review";
+                    if (!perms[requiredPerm]) {
+                        return res.status(403).json({
+                            message: `This LGU Admin account does not have the '${requiredPerm}' permission for this action.`
+                        });
+                    }
+                }
 
                 const expectedApplicationStatus = {
                     barangay: "barangay_verification",
@@ -2790,6 +3681,852 @@ function createApp({
         }
     }
 
+    const systemAdminMiddleware = [
+        requireAuthentication,
+        requireRole("System Admin")
+    ];
+
+    app.get(
+        "/api/system-admin/lookups",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            try {
+                const capabilities = await getSchemaCapabilities(pool);
+                const fundingUnits = capabilities.relationalProgramSchema
+                    ? await pool.query(
+                        `SELECT funding_unit_id, funding_unit_name, funding_unit_code, status
+                         FROM "Funding_Units"
+                         WHERE status = 'active'
+                         ORDER BY funding_unit_id`
+                    )
+                    : { rows: [] };
+                const barangays = await pool.query(
+                    'SELECT barangay_id, barangay_name FROM "Barangays" ORDER BY barangay_name'
+                );
+                const schools = await pool.query(
+                    'SELECT school_id, school_name, is_approved FROM "Schools" ORDER BY school_id'
+                );
+                const schoolDomains = capabilities.hasSchoolEmailDomains
+                    ? await pool.query(
+                        `SELECT sd.domain_id, sd.school_id, s.school_name,
+                                sd.domain, sd.domain_status, sd.is_primary,
+                                sd.notes, sd.updated_at
+                         FROM "School_Email_Domains" sd
+                         JOIN "Schools" s ON s.school_id = sd.school_id
+                         ORDER BY sd.school_id, sd.is_primary DESC, sd.domain`
+                    )
+                    : { rows: [] };
+                return res.json({
+                    fundingUnits: fundingUnits.rows,
+                    barangays: barangays.rows,
+                    schools: schools.rows,
+                    schoolDomains: schoolDomains.rows,
+                    lguPermissionCategories: LGU_PERMISSION_CATEGORIES,
+                    defaultLguPermissions: DEFAULT_LGU_PERMISSIONS,
+                    emailDeliveryEnabled: emailPolicyConfig.emailVerificationEnabled,
+                    proposedDirectories: {
+                        developers: [...emailPolicyConfig.developerAllowlist],
+                        lguOfficials: PROPOSED_LGU_OFFICIALS_DIRECTORY,
+                        barangayCoordinators: PROPOSED_BARANGAY_COORDINATOR_DIRECTORY,
+                        schoolRegistrars: PROPOSED_SCHOOL_REGISTRAR_DIRECTORY
+                    }
+                });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
+    app.get(
+        "/api/system-admin/staff-authorizations",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            try {
+                const capabilities = await getSchemaCapabilities(pool);
+                if (!capabilities.hasStaffAuthorizations) {
+                    return res.status(503).json({
+                        message: "The staff authorization schema is not installed."
+                    });
+                }
+                const result = await pool.query(
+                    `SELECT sa.authorization_id, sa.email, sa.role_name,
+                            sa.funding_unit_id, unit.funding_unit_name,
+                            sa.barangay_id, barangay.barangay_name,
+                            sa.school_id, school.school_name,
+                            sa.position_title, sa.lgu_permissions,
+                            CASE
+                                WHEN sa.status = 'pending'
+                                  AND sa.expires_at IS NOT NULL
+                                  AND sa.expires_at <= NOW()
+                                THEN 'expired'
+                                ELSE sa.status
+                            END AS status,
+                            sa.expires_at,
+                            sa.authorized_by,
+                            authorizer.email AS authorized_by_email,
+                            sa.authorized_at,
+                            sa.activated_user_id,
+                            sa.activated_at,
+                            sa.revoked_by,
+                            revoker.email AS revoked_by_email,
+                            sa.revoked_at,
+                            sa.revocation_reason,
+                            sa.notes,
+                            sa.updated_at
+                     FROM "Staff_Email_Authorizations" sa
+                     LEFT JOIN "Funding_Units" unit ON unit.funding_unit_id = sa.funding_unit_id
+                     LEFT JOIN "Barangays" barangay ON barangay.barangay_id = sa.barangay_id
+                     LEFT JOIN "Schools" school ON school.school_id = sa.school_id
+                     LEFT JOIN "Users" authorizer ON authorizer.user_id = sa.authorized_by
+                     LEFT JOIN "Users" revoker ON revoker.user_id = sa.revoked_by
+                     ORDER BY sa.authorized_at DESC, sa.authorization_id DESC
+                     LIMIT $1`,
+                    [MAX_QUEUE_SIZE * 2]
+                );
+                return res.json({ authorizations: result.rows });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
+    app.post(
+        "/api/system-admin/staff-authorizations",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            const input = staffAuthorizationCreateSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Staff authorization details are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+
+            const data = input.data;
+            if (emailPolicyConfig.developerAllowlist.has(data.email)) {
+                return res.status(400).json({
+                    message:
+                        "Developer allowlist email addresses cannot be assigned ordinary staff roles via staff invitations.",
+                    errors: [{
+                        field: "email",
+                        message: "Use a dedicated staff email address."
+                    }]
+                });
+            }
+
+            if (data.role === "LGU Admin") {
+                if (!data.fundingUnitId || data.barangayId || data.schoolId) {
+                    return res.status(400).json({
+                        message:
+                            "LGU Program Admin authorizations require exactly one fundingUnitId and no barangayId or schoolId.",
+                        errors: [{
+                            field: "fundingUnitId",
+                            message: "Select one authorized funding unit."
+                        }]
+                    });
+                }
+            } else if (data.role === "Barangay Coordinator") {
+                if (!data.barangayId || data.fundingUnitId || data.schoolId) {
+                    return res.status(400).json({
+                        message:
+                            "Barangay Coordinator authorizations require exactly one barangayId and no fundingUnitId or schoolId.",
+                        errors: [{
+                            field: "barangayId",
+                            message: "Select one authorized barangay."
+                        }]
+                    });
+                }
+            } else if (data.role === "Registrar") {
+                if (!data.schoolId || data.fundingUnitId || data.barangayId) {
+                    return res.status(400).json({
+                        message:
+                            "School Registrar authorizations require exactly one schoolId and no fundingUnitId or barangayId.",
+                        errors: [{
+                            field: "schoolId",
+                            message: "Select one authorized school."
+                        }]
+                    });
+                }
+            }
+
+            let capabilities;
+            try {
+                capabilities = await getSchemaCapabilities(pool);
+            } catch (error) {
+                return next(error);
+            }
+            if (!capabilities.hasStaffAuthorizations) {
+                return res.status(503).json({
+                    message: "The staff authorization schema is not installed."
+                });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+                    data.email
+                ]);
+
+                let schoolDomainsForValidation = null;
+                if (data.role === "LGU Admin") {
+                    const unit = await client.query(
+                        `SELECT funding_unit_id, funding_unit_name
+                         FROM "Funding_Units"
+                         WHERE funding_unit_id = $1 AND status = 'active'`,
+                        [data.fundingUnitId]
+                    );
+                    if (unit.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Select an active funding unit.",
+                            errors: [{
+                                field: "fundingUnitId",
+                                message: "Select an active funding unit."
+                            }]
+                        });
+                    }
+                } else if (data.role === "Barangay Coordinator") {
+                    const barangay = await client.query(
+                        'SELECT 1 FROM "Barangays" WHERE barangay_id = $1',
+                        [data.barangayId]
+                    );
+                    if (barangay.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Select a valid Tagbilaran barangay.",
+                            errors: [{
+                                field: "barangayId",
+                                message: "Select a valid barangay."
+                            }]
+                        });
+                    }
+                } else if (data.role === "Registrar") {
+                    const school = await client.query(
+                        'SELECT 1 FROM "Schools" WHERE school_id = $1 AND is_approved = TRUE',
+                        [data.schoolId]
+                    );
+                    if (school.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(400).json({
+                            message: "Select an approved partner school.",
+                            errors: [{
+                                field: "schoolId",
+                                message: "Select an approved school."
+                            }]
+                        });
+                    }
+                    if (capabilities.hasSchoolEmailDomains) {
+                        const sd = await client.query(
+                            `SELECT domain
+                             FROM "School_Email_Domains"
+                             WHERE school_id = $1 AND domain_status = 'verified'`,
+                            [data.schoolId]
+                        );
+                        if (sd.rowCount > 0) {
+                            schoolDomainsForValidation = sd.rows.map((r) => r.domain);
+                        }
+                    } else if (DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId]) {
+                        schoolDomainsForValidation = [DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId]];
+                    }
+                }
+
+                const emailCheck = validateEmailForRole(
+                    data.email,
+                    data.role,
+                    emailPolicyConfig,
+                    {
+                        isDeveloperAuthorized: true,
+                        schoolDomain: schoolDomainsForValidation
+                    }
+                );
+                if (!emailCheck.valid) {
+                    await client.query("ROLLBACK");
+                    return res.status(400).json({
+                        message: emailCheck.message,
+                        errors: [{
+                            field: "email",
+                            message: emailCheck.message
+                        }]
+                    });
+                }
+
+                const existingAuth = await client.query(
+                    `SELECT authorization_id, status, expires_at
+                     FROM "Staff_Email_Authorizations"
+                     WHERE lower(email) = $1
+                       AND status IN ('pending', 'active')
+                     LIMIT 1
+                     FOR UPDATE`,
+                    [data.email]
+                );
+                if (existingAuth.rowCount > 0) {
+                    const current = existingAuth.rows[0];
+                    const isExpiredPending =
+                        current.status === "pending" &&
+                        current.expires_at &&
+                        new Date(current.expires_at).getTime() <= Date.now();
+                    if (!isExpiredPending) {
+                        await client.query("ROLLBACK");
+                        return res.status(409).json({
+                            message:
+                                "An active or pending staff authorization already exists for this email address."
+                        });
+                    }
+                    await client.query(
+                        `UPDATE "Staff_Email_Authorizations"
+                         SET status = 'expired', updated_at = NOW()
+                         WHERE authorization_id = $1`,
+                        [current.authorization_id]
+                    );
+                }
+
+                const expiresInHours = data.expiresInHours || 72;
+                const rawInvitationToken = crypto.randomBytes(32).toString("base64url");
+                const resolvedLguPermissions =
+                    data.role === "LGU Admin"
+                        ? {
+                            ...DEFAULT_LGU_PERMISSIONS,
+                            ...(data.lguPermissions || {})
+                        }
+                        : null;
+
+                const inserted = await client.query(
+                    `INSERT INTO "Staff_Email_Authorizations" (
+                        email, role_name, funding_unit_id, barangay_id, school_id,
+                        position_title, lgu_permissions, invitation_token_hash,
+                        status, expires_at, authorized_by, authorized_at, notes
+                     ) VALUES (
+                        $1, $2, $3, $4, $5,
+                        $6, $7::JSONB, $8,
+                        'pending', NOW() + ($9 * INTERVAL '1 hour'), $10, NOW(), $11
+                     )
+                     RETURNING authorization_id, email, role_name,
+                               funding_unit_id, barangay_id, school_id,
+                               position_title, lgu_permissions, status,
+                               expires_at, authorized_by, authorized_at, notes`,
+                    [
+                        data.email,
+                        data.role,
+                        data.role === "LGU Admin" ? data.fundingUnitId : null,
+                        data.role === "Barangay Coordinator" ? data.barangayId : null,
+                        data.role === "Registrar" ? data.schoolId : null,
+                        data.positionTitle || null,
+                        resolvedLguPermissions ? JSON.stringify(resolvedLguPermissions) : null,
+                        tokenHash(rawInvitationToken),
+                        expiresInHours,
+                        req.auth.userId,
+                        data.notes || null
+                    ]
+                );
+
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'staff_authorization_created', 'Staff_Email_Authorizations', $2,
+                               jsonb_build_object(
+                                   'email', $3::TEXT,
+                                   'role_name', $4::TEXT,
+                                   'funding_unit_id', $5::INTEGER,
+                                   'barangay_id', $6::INTEGER,
+                                   'school_id', $7::INTEGER
+                               ))`,
+                    [
+                        req.auth.userId,
+                        inserted.rows[0].authorization_id,
+                        data.email,
+                        data.role,
+                        data.fundingUnitId || null,
+                        data.barangayId || null,
+                        data.schoolId || null
+                    ]
+                );
+
+                await client.query("COMMIT");
+                return res.status(201).json({
+                    message: emailPolicyConfig.emailVerificationEnabled
+                        ? "Staff authorization recorded and invitation prepared for email delivery."
+                        : "Staff authorization recorded. Automated SMTP delivery is currently disabled; share the single-use invitation token below with the authorized staff member.",
+                    authorization: inserted.rows[0],
+                    invitationToken: rawInvitationToken,
+                    emailDelivery: {
+                        enabled: emailPolicyConfig.emailVerificationEnabled,
+                        emailSent: false
+                    }
+                });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Staff authorization creation rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (error.code === "23505") {
+                    return res.status(409).json({
+                        message:
+                            "An active or pending staff authorization already exists for this email address."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
+    app.post(
+        "/api/system-admin/staff-authorizations/:authorizationId/regenerate-token",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            const authorizationId = parsePositiveId(
+                req.params.authorizationId,
+                "Authorization ID",
+                res
+            );
+            if (!authorizationId) return;
+            try {
+                const capabilities = await getSchemaCapabilities(pool);
+                if (!capabilities.hasStaffAuthorizations) {
+                    return res.status(503).json({
+                        message: "The staff authorization schema is not installed."
+                    });
+                }
+                const rawInvitationToken = crypto.randomBytes(32).toString("base64url");
+                const updated = await pool.query(
+                    `UPDATE "Staff_Email_Authorizations"
+                     SET invitation_token_hash = $1,
+                         status = 'pending',
+                         expires_at = NOW() + INTERVAL '72 hours',
+                         updated_at = NOW()
+                     WHERE authorization_id = $2
+                       AND status IN ('pending', 'expired')
+                     RETURNING authorization_id, email, role_name, status, expires_at`,
+                    [tokenHash(rawInvitationToken), authorizationId]
+                );
+                if (updated.rowCount === 0) {
+                    return res.status(409).json({
+                        message: "Only pending or expired invitations can regenerate a token."
+                    });
+                }
+                await pool.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'staff_invitation_regenerated', 'Staff_Email_Authorizations', $2,
+                               jsonb_build_object('email', $3::TEXT))`,
+                    [req.auth.userId, authorizationId, updated.rows[0].email]
+                );
+                return res.json({
+                    message: "Invitation token regenerated.",
+                    authorization: updated.rows[0],
+                    invitationToken: rawInvitationToken,
+                    emailDelivery: {
+                        enabled: emailPolicyConfig.emailVerificationEnabled,
+                        emailSent: false
+                    }
+                });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
+    app.post(
+        "/api/system-admin/staff-authorizations/:authorizationId/revoke",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            const authorizationId = parsePositiveId(
+                req.params.authorizationId,
+                "Authorization ID",
+                res
+            );
+            if (!authorizationId) return;
+            const input = staffAuthorizationRevokeSchema.safeParse(req.body || {});
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "Revocation details are invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+
+            let capabilities;
+            try {
+                capabilities = await getSchemaCapabilities(pool);
+            } catch (error) {
+                return next(error);
+            }
+            if (!capabilities.hasStaffAuthorizations) {
+                return res.status(503).json({
+                    message: "The staff authorization schema is not installed."
+                });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                const current = await client.query(
+                    `SELECT authorization_id, email, role_name, status, activated_user_id
+                     FROM "Staff_Email_Authorizations"
+                     WHERE authorization_id = $1
+                     FOR UPDATE`,
+                    [authorizationId]
+                );
+                if (current.rowCount === 0) {
+                    await client.query("ROLLBACK");
+                    return res.status(404).json({
+                        message: "Staff authorization not found."
+                    });
+                }
+                const authRecord = current.rows[0];
+                if (authRecord.status === "revoked") {
+                    await client.query("ROLLBACK");
+                    return res.status(409).json({
+                        message: "This staff authorization is already revoked."
+                    });
+                }
+
+                const revoked = await client.query(
+                    `UPDATE "Staff_Email_Authorizations"
+                     SET status = 'revoked',
+                         revoked_by = $1,
+                         revoked_at = NOW(),
+                         revocation_reason = $2,
+                         invitation_token_hash = NULL,
+                         updated_at = NOW()
+                     WHERE authorization_id = $3
+                     RETURNING authorization_id, email, role_name, status,
+                               revoked_by, revoked_at, revocation_reason`,
+                    [req.auth.userId, input.data.reason || null, authorizationId]
+                );
+
+                const matchingUser = await client.query(
+                    `SELECT user_id
+                     FROM "Users"
+                     WHERE user_id = $1 OR lower(email) = lower($2)
+                     LIMIT 1
+                     FOR UPDATE`,
+                    [authRecord.activated_user_id || -1, authRecord.email]
+                );
+
+                let revokedSessionCount = 0;
+                if (matchingUser.rowCount > 0) {
+                    const targetUserId = matchingUser.rows[0].user_id;
+                    await client.query(
+                        'UPDATE "Users" SET is_active = FALSE WHERE user_id = $1',
+                        [targetUserId]
+                    );
+                    await client.query(
+                        'UPDATE "LGU_Admins" SET is_active = FALSE WHERE user_id = $1',
+                        [targetUserId]
+                    );
+                    await client.query(
+                        `UPDATE "Barangay_Coordinators"
+                         SET is_current = FALSE,
+                             term_end = COALESCE(term_end, CURRENT_DATE)
+                         WHERE user_id = $1 AND is_current = TRUE`,
+                        [targetUserId]
+                    );
+                    await client.query(
+                        'UPDATE "Registrars" SET is_active = FALSE WHERE user_id = $1',
+                        [targetUserId]
+                    );
+                    const revokedSessions = await client.query(
+                        `UPDATE "Login_Sessions"
+                         SET revoked_at = NOW()
+                         WHERE user_id = $1 AND revoked_at IS NULL`,
+                        [targetUserId]
+                    );
+                    revokedSessionCount = revokedSessions.rowCount || 0;
+                }
+
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'staff_authorization_revoked', 'Staff_Email_Authorizations', $2,
+                               jsonb_build_object(
+                                   'email', $3::TEXT,
+                                   'role_name', $4::TEXT,
+                                   'reason', $5::TEXT,
+                                   'revoked_sessions', $6::INTEGER
+                               ))`,
+                    [
+                        req.auth.userId,
+                        authorizationId,
+                        authRecord.email,
+                        authRecord.role_name,
+                        input.data.reason || "",
+                        revokedSessionCount
+                    ]
+                );
+
+                await client.query("COMMIT");
+                return res.json({
+                    message: "Staff authorization revoked and active sessions terminated.",
+                    authorization: revoked.rows[0],
+                    sessionsRevoked: true,
+                    revokedSessionCount
+                });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("Staff revocation rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
+    app.get(
+        "/api/system-admin/school-domains",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            try {
+                const capabilities = await getSchemaCapabilities(pool);
+                if (!capabilities.hasSchoolEmailDomains) {
+                    return res.status(503).json({
+                        message: "The school email domains schema is not installed."
+                    });
+                }
+                const result = await pool.query(
+                    `SELECT sd.domain_id, sd.school_id, s.school_name, s.is_approved,
+                            sd.domain, sd.domain_status, sd.is_primary,
+                            sd.notes, sd.created_at, sd.updated_at
+                     FROM "School_Email_Domains" sd
+                     JOIN "Schools" s ON s.school_id = sd.school_id
+                     ORDER BY sd.school_id, sd.is_primary DESC, sd.domain`
+                );
+                return res.json({ schoolDomains: result.rows });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
+    app.post(
+        "/api/system-admin/school-domains",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            const input = schoolDomainCreateSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "School domain configuration is invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+            const data = input.data;
+            if (!data.schoolId && !data.schoolName) {
+                return res.status(400).json({
+                    message: "Provide either an existing schoolId or a new schoolName."
+                });
+            }
+
+            let capabilities;
+            try {
+                capabilities = await getSchemaCapabilities(pool);
+            } catch (error) {
+                return next(error);
+            }
+            if (!capabilities.hasSchoolEmailDomains) {
+                return res.status(503).json({
+                    message: "The school email domains schema is not installed."
+                });
+            }
+
+            const client = await pool.connect();
+            try {
+                await client.query("BEGIN");
+                let targetSchoolId = data.schoolId || null;
+                let schoolRecord = null;
+
+                if (targetSchoolId) {
+                    const existingSchool = await client.query(
+                        'SELECT school_id, school_name, is_approved FROM "Schools" WHERE school_id = $1',
+                        [targetSchoolId]
+                    );
+                    if (existingSchool.rowCount === 0) {
+                        await client.query("ROLLBACK");
+                        return res.status(404).json({ message: "School not found." });
+                    }
+                    schoolRecord = existingSchool.rows[0];
+                } else {
+                    const createdSchool = await client.query(
+                        `INSERT INTO "Schools" (school_name, is_approved)
+                         VALUES ($1, TRUE)
+                         ON CONFLICT (school_name) DO UPDATE SET is_approved = TRUE
+                         RETURNING school_id, school_name, is_approved`,
+                        [data.schoolName]
+                    );
+                    schoolRecord = createdSchool.rows[0];
+                    targetSchoolId = schoolRecord.school_id;
+                }
+
+                let domainRecord = null;
+                if (data.domain) {
+                    const insertedDomain = await client.query(
+                        `INSERT INTO "School_Email_Domains" (
+                            school_id, domain, domain_status, is_primary, configured_by, notes
+                         ) VALUES ($1, $2, $3, $4, $5, $6)
+                         RETURNING domain_id, school_id, domain, domain_status, is_primary, notes`,
+                        [
+                            targetSchoolId,
+                            data.domain,
+                            data.domainStatus || "verified",
+                            data.isPrimary !== undefined ? data.isPrimary : true,
+                            req.auth.userId,
+                            data.notes || null
+                        ]
+                    );
+                    domainRecord = insertedDomain.rows[0];
+                }
+
+                await client.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'school_domain_configured', 'Schools', $2,
+                               jsonb_build_object(
+                                   'school_name', $3::TEXT,
+                                   'domain', $4::TEXT
+                               ))`,
+                    [
+                        req.auth.userId,
+                        targetSchoolId,
+                        schoolRecord.school_name,
+                        data.domain || ""
+                    ]
+                );
+
+                await client.query("COMMIT");
+                return res.status(201).json({
+                    school: schoolRecord,
+                    schoolDomain: domainRecord
+                });
+            } catch (error) {
+                try {
+                    await client.query("ROLLBACK");
+                } catch (rollbackError) {
+                    logger.error("School domain configuration rollback failed", {
+                        code: rollbackError.code
+                    });
+                }
+                if (error.code === "23505") {
+                    return res.status(409).json({
+                        message: "This school email domain is already configured."
+                    });
+                }
+                return next(error);
+            } finally {
+                client.release();
+            }
+        }
+    );
+
+    app.patch(
+        "/api/system-admin/school-domains/:domainId",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            const domainId = parsePositiveId(req.params.domainId, "Domain ID", res);
+            if (!domainId) return;
+            const input = schoolDomainUpdateSchema.safeParse(req.body);
+            if (!input.success) {
+                return res.status(400).json({
+                    message: "School domain update is invalid.",
+                    errors: input.error.issues.map(({ path, message }) => ({
+                        field: path.join("."),
+                        message
+                    }))
+                });
+            }
+            try {
+                const capabilities = await getSchemaCapabilities(pool);
+                if (!capabilities.hasSchoolEmailDomains) {
+                    return res.status(503).json({
+                        message: "The school email domains schema is not installed."
+                    });
+                }
+                const fields = {
+                    domain: "domain",
+                    domainStatus: "domain_status",
+                    isPrimary: "is_primary",
+                    notes: "notes"
+                };
+                const values = [domainId];
+                const updates = Object.entries(input.data).map(([key, value]) => {
+                    values.push(value);
+                    return `${fields[key]} = $${values.length}`;
+                });
+                updates.push("updated_at = NOW()");
+                const result = await pool.query(
+                    `UPDATE "School_Email_Domains"
+                     SET ${updates.join(", ")}
+                     WHERE domain_id = $1
+                     RETURNING domain_id, school_id, domain, domain_status, is_primary, notes, updated_at`,
+                    values
+                );
+                if (result.rowCount === 0) {
+                    return res.status(404).json({ message: "School domain not found." });
+                }
+                await pool.query(
+                    `INSERT INTO "Audit_Logs" (
+                        user_id, action_type, entity_type, entity_id, details
+                     ) VALUES ($1, 'school_domain_updated', 'School_Email_Domains', $2,
+                               jsonb_build_object('domain', $3::TEXT, 'status', $4::TEXT))`,
+                    [
+                        req.auth.userId,
+                        domainId,
+                        result.rows[0].domain,
+                        result.rows[0].domain_status
+                    ]
+                );
+                return res.json({ schoolDomain: result.rows[0] });
+            } catch (error) {
+                if (error.code === "23505") {
+                    return res.status(409).json({
+                        message: "This school email domain is already assigned."
+                    });
+                }
+                return next(error);
+            }
+        }
+    );
+
+    app.get(
+        "/api/system-admin/audit-logs",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            try {
+                const result = await pool.query(
+                    `SELECT log.log_id, log.user_id, actor.email AS actor_email,
+                            actor.first_name AS actor_first_name,
+                            actor.last_name AS actor_last_name,
+                            log.action_type, log.entity_type, log.entity_id,
+                            log.details, log.created_at
+                     FROM "Audit_Logs" log
+                     LEFT JOIN "Users" actor ON actor.user_id = log.user_id
+                     ORDER BY log.created_at DESC, log.log_id DESC
+                     LIMIT $1`,
+                    [MAX_QUEUE_SIZE]
+                );
+                return res.json({ auditLogs: result.rows });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
     app.use((error, req, res, next) => {
         if (res.headersSent) return next(error);
         if (error instanceof SyntaxError && error.status === 400 && "body" in error) {
@@ -2813,6 +4550,8 @@ module.exports = {
     ROLE_PORTAL_PATHS,
     ROLE_SCOPE_TYPES,
     normalizeEmail,
+    parseEmailAddress,
     getEmailPolicyConfig,
-    validateEmailForRole
+    validateEmailForRole,
+    tokenHash
 };

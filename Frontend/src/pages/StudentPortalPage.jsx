@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { CheckCircle2, KeyRound, MailCheck, ShieldAlert } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
 import { getPortalPathForRole } from "./LoginPage.jsx";
@@ -13,6 +14,7 @@ export default function StudentPortalPage() {
   const [selectedProgramId, setSelectedProgramId] = useState(
     () => searchParams.get("programId") || "",
   );
+  const [currentUser, setCurrentUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [programs, setPrograms] = useState([]);
   const [applications, setApplications] = useState([]);
@@ -23,6 +25,14 @@ export default function StudentPortalPage() {
   const [loadingDetail, setLoadingDetail] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const [verificationTokenInput, setVerificationTokenInput] = useState(
+    () => searchParams.get("verifyToken") || "",
+  );
+  const [issuedDevToken, setIssuedDevToken] = useState("");
+  const [verifyingEmail, setVerifyingEmail] = useState(false);
+  const [resendingVerification, setResendingVerification] = useState(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,6 +50,7 @@ export default function StudentPortalPage() {
           apiRequest("student/profile").catch(() => ({ profile: null })),
         ]);
         if (active) {
+          setCurrentUser(user);
           setPrograms(programData.programs || []);
           setApplicationSubmissionEnabled(
             programData.applicationSubmissionEnabled === true,
@@ -69,6 +80,71 @@ export default function StudentPortalPage() {
   async function refreshApplications() {
     const data = await apiRequest("student/applications");
     setApplications(data.applications || []);
+  }
+
+  async function handleRequestVerificationToken() {
+    setError("");
+    setNotice("");
+    setResendingVerification(true);
+    try {
+      const result = await apiRequest("auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email: currentUser?.email || "" }),
+      });
+      const devToken =
+        result.emailVerification?.verificationToken || result.verificationToken;
+      if (devToken) {
+        setIssuedDevToken(devToken);
+        setVerificationTokenInput(devToken);
+      }
+      setNotice(
+        result.message ||
+          "Verification token generated. Enter the token below to verify your email ownership.",
+      );
+    } catch (requestError) {
+      setError(
+        requestError.message ||
+          "Could not issue an email verification token at this time.",
+      );
+    } finally {
+      setResendingVerification(false);
+    }
+  }
+
+  async function handleVerifyEmail(event) {
+    event.preventDefault();
+    setError("");
+    setNotice("");
+    const trimmedToken = verificationTokenInput.trim();
+    if (!trimmedToken) {
+      setError("Enter your email verification token.");
+      return;
+    }
+    setVerifyingEmail(true);
+    try {
+      const result = await apiRequest("auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({
+          email: currentUser?.email || "",
+          verificationToken: trimmedToken,
+        }),
+      });
+      const refreshed = await apiRequest("auth/me");
+      setCurrentUser(refreshed.user || currentUser);
+      setIssuedDevToken("");
+      setVerificationTokenInput("");
+      setNotice(
+        result.message ||
+          "Email ownership verified. Note: School Registrar enrollment verification is still completed separately by your school registrar.",
+      );
+    } catch (requestError) {
+      setError(
+        requestError.message ||
+          "Email verification failed. Check that your token is valid and has not expired.",
+      );
+    } finally {
+      setVerifyingEmail(false);
+    }
   }
 
   async function submitApplication(event) {
@@ -165,7 +241,7 @@ export default function StudentPortalPage() {
       {notice && (
         <div role="status" className="auth-banner auth-banner-success">
           <div>
-            <strong>Application submitted</strong>
+            <strong>Portal update</strong>
             <p>{notice}</p>
           </div>
         </div>
@@ -194,8 +270,91 @@ export default function StudentPortalPage() {
                     <strong>Barangay:</strong> {profile.barangay_name}
                   </span>
                 )}
+                <span>
+                  <strong>Email Ownership:</strong>{" "}
+                  {currentUser?.emailVerified ? "Verified" : "Unverified"}
+                </span>
               </div>
             </section>
+          )}
+
+          {currentUser && !currentUser.emailVerified && (
+            <section className="instruction-main">
+              <p className="eyebrow">SCHOOL / STUDENT EMAIL OWNERSHIP VERIFICATION</p>
+              <h2>Verify control of {currentUser.email}.</h2>
+              <p className="field-hint">
+                <ShieldAlert size={15} aria-hidden="true" /> Verifying your
+                email address confirms that you control this email account. It{" "}
+                <strong>does not</strong> replace School Registrar enrollment
+                verification or Barangay Coordinator residency verification.
+              </p>
+
+              {issuedDevToken && (
+                <div role="status" className="auth-banner auth-banner-success">
+                  <KeyRound size={18} aria-hidden="true" />
+                  <div>
+                    <strong>Development / Manual Verification Token Issued</strong>
+                    <p>
+                      Automated email sending is disabled in this environment (
+                      <code>EMAIL_VERIFICATION_ENABLED=false</code>). Use this
+                      one-time token to verify your email ownership:{" "}
+                      <code>{issuedDevToken}</code>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyEmail} className="auth-form">
+                <div className="form-field">
+                  <label className="form-label" htmlFor="student-verify-token">
+                    Single-use verification token
+                  </label>
+                  <input
+                    id="student-verify-token"
+                    className="form-input"
+                    placeholder="Paste your email verification token"
+                    value={verificationTokenInput}
+                    onChange={(e) => setVerificationTokenInput(e.target.value)}
+                    disabled={verifyingEmail}
+                  />
+                </div>
+                <div className="staff-actions">
+                  <button
+                    type="submit"
+                    className="button button-primary"
+                    disabled={verifyingEmail || !verificationTokenInput.trim()}
+                  >
+                    <MailCheck size={15} aria-hidden="true" />{" "}
+                    {verifyingEmail ? "Verifying..." : "Verify email ownership"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={handleRequestVerificationToken}
+                    disabled={resendingVerification}
+                  >
+                    {resendingVerification
+                      ? "Generating token..."
+                      : "Send / generate verification token"}
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {currentUser?.emailVerified && (
+            <div role="status" className="auth-banner auth-banner-success">
+              <CheckCircle2 size={18} aria-hidden="true" />
+              <div>
+                <strong>Email ownership verified ({currentUser.email})</strong>
+                <p>
+                  Your email address ownership is verified. School Registrar
+                  enrollment verification and Barangay residency verification
+                  are still performed independently on each scholarship
+                  application.
+                </p>
+              </div>
+            </div>
           )}
 
           <section className="instruction-main">

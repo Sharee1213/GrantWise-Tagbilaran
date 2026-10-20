@@ -138,21 +138,42 @@ async function seedOperationalData(dbPool = pool) {
                      SET funding_unit_id = COALESCE(funding_unit_id, $2),
                          funding_cycle_id = COALESCE(funding_cycle_id, $3),
                          funding_cycle = COALESCE(funding_cycle, $4),
+                         total_budget = GREATEST(total_budget, $6::numeric),
+                         remaining_budget = GREATEST(total_budget, $6::numeric) - reserved_budget - released_budget,
                          status = 'active',
                          end_date = GREATEST(COALESCE(end_date, $5::date), $5::date)
                      WHERE program_id = $1`,
-                    [programId, unitId, cycleId, spec.cycleCode, spec.endDate]
+                    [programId, unitId, cycleId, spec.cycleCode, spec.endDate, spec.totalBudget]
                 );
             }
 
+            const existingAllocSum = await client.query(
+                `SELECT COALESCE(SUM(allocated_amount), 0)::numeric AS total_allocated
+                 FROM "Program_Barangay_Allocations"
+                 WHERE program_id = $1`,
+                [programId]
+            );
+            let runningAllocated = Number(existingAllocSum.rows[0]?.total_allocated || 0);
+            const safePerBarangayBudget = Math.min(
+                spec.perBarangayBudget,
+                Math.floor(spec.totalBudget / Math.max(1, barangaysRes.rows.length))
+            );
+
             for (const barangay of barangaysRes.rows) {
-                await client.query(
+                if (runningAllocated + safePerBarangayBudget > spec.totalBudget) {
+                    break;
+                }
+                const insertedAlloc = await client.query(
                     `INSERT INTO "Program_Barangay_Allocations" (
                         program_id, barangay_id, allocated_amount, reserved_amount, released_amount
                      ) VALUES ($1, $2, $3, 0, 0)
-                     ON CONFLICT (program_id, barangay_id) DO NOTHING`,
-                    [programId, barangay.barangay_id, spec.perBarangayBudget]
+                     ON CONFLICT (program_id, barangay_id) DO NOTHING
+                     RETURNING allocation_id`,
+                    [programId, barangay.barangay_id, safePerBarangayBudget]
                 );
+                if (insertedAlloc.rowCount > 0) {
+                    runningAllocated += safePerBarangayBudget;
+                }
             }
         }
 
@@ -191,10 +212,11 @@ async function seedOperationalData(dbPool = pool) {
 
             const userRes = await client.query(
                 `INSERT INTO "Users" (
-                    role_id, first_name, last_name, email, password_hash, phone_number, is_active
-                 ) VALUES ($1, $2, $3, $4, $5, '09171001001', TRUE)
+                    role_id, first_name, last_name, email, password_hash, phone_number, email_verified_at, is_active
+                 ) VALUES ($1, $2, $3, $4, $5, '09171001001', NOW(), TRUE)
                  ON CONFLICT (email) DO UPDATE
                  SET role_id = EXCLUDED.role_id,
+                     email_verified_at = COALESCE("Users".email_verified_at, NOW()),
                      is_active = TRUE
                  RETURNING user_id`,
                 [
@@ -216,6 +238,19 @@ async function seedOperationalData(dbPool = pool) {
                      is_active = TRUE`,
                 [userId, unitId, adminSpec.positionTitle]
             );
+
+            await client.query(
+                `INSERT INTO "Staff_Email_Authorizations" (
+                    email, role_name, funding_unit_id, position_title, status, activated_at, activated_user_id, notes
+                 )
+                 SELECT $1::VARCHAR, 'LGU Admin', $2::INTEGER, $3::VARCHAR, 'active', NOW(), $4::INTEGER, 'local_seed_authorized'
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM "Staff_Email_Authorizations"
+                     WHERE LOWER(BTRIM(email)) = LOWER(BTRIM($1::VARCHAR))
+                       AND status IN ('pending', 'active')
+                 )`,
+                [adminSpec.email, unitId, adminSpec.positionTitle, userId]
+            );
         }
 
         for (const barangay of barangaysRes.rows) {
@@ -232,11 +267,12 @@ async function seedOperationalData(dbPool = pool) {
             const email = `coordinator.${slug}@grantwise.local`;
             const userRes = await client.query(
                 `INSERT INTO "Users" (
-                    role_id, barangay_id, first_name, last_name, email, password_hash, phone_number, is_active
-                 ) VALUES ($1, $2, $3, $4, $5, $6, '09172002002', TRUE)
+                    role_id, barangay_id, first_name, last_name, email, password_hash, phone_number, email_verified_at, is_active
+                 ) VALUES ($1, $2, $3, $4, $5, $6, '09172002002', NOW(), TRUE)
                  ON CONFLICT (email) DO UPDATE
                  SET role_id = EXCLUDED.role_id,
                      barangay_id = EXCLUDED.barangay_id,
+                     email_verified_at = COALESCE("Users".email_verified_at, NOW()),
                      is_active = TRUE
                  RETURNING user_id`,
                 [
@@ -259,6 +295,19 @@ async function seedOperationalData(dbPool = pool) {
                      is_current = TRUE`,
                 [userId, barangay.barangay_id]
             );
+
+            await client.query(
+                `INSERT INTO "Staff_Email_Authorizations" (
+                    email, role_name, barangay_id, position_title, status, activated_at, activated_user_id, notes
+                 )
+                 SELECT $1::VARCHAR, 'Barangay Coordinator', $2::INTEGER, 'Barangay Education Coordinator', 'active', NOW(), $3::INTEGER, 'local_seed_authorized'
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM "Staff_Email_Authorizations"
+                     WHERE LOWER(BTRIM(email)) = LOWER(BTRIM($1::VARCHAR))
+                       AND status IN ('pending', 'active')
+                 )`,
+                [email, barangay.barangay_id, userId]
+            );
         }
 
         const schoolShortSlugs = new Map([
@@ -278,10 +327,11 @@ async function seedOperationalData(dbPool = pool) {
 
             const userRes = await client.query(
                 `INSERT INTO "Users" (
-                    role_id, first_name, last_name, email, password_hash, phone_number, is_active
-                 ) VALUES ($1, $2, 'Registrar', $3, $4, '09173003003', TRUE)
+                    role_id, first_name, last_name, email, password_hash, phone_number, email_verified_at, is_active
+                 ) VALUES ($1, $2, 'Registrar', $3, $4, '09173003003', NOW(), TRUE)
                  ON CONFLICT (email) DO UPDATE
                  SET role_id = EXCLUDED.role_id,
+                     email_verified_at = COALESCE("Users".email_verified_at, NOW()),
                      is_active = TRUE
                  RETURNING user_id`,
                 [registrarRoleId, school.school_name, email, passwordHash]
@@ -297,6 +347,19 @@ async function seedOperationalData(dbPool = pool) {
                      is_active = TRUE`,
                 [userId, school.school_id]
             );
+
+            await client.query(
+                `INSERT INTO "Staff_Email_Authorizations" (
+                    email, role_name, school_id, position_title, status, activated_at, activated_user_id, notes
+                 )
+                 SELECT $1::VARCHAR, 'Registrar', $2::INTEGER, 'University Registrar', 'active', NOW(), $3::INTEGER, 'local_seed_authorized'
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM "Staff_Email_Authorizations"
+                     WHERE LOWER(BTRIM(email)) = LOWER(BTRIM($1::VARCHAR))
+                       AND status IN ('pending', 'active')
+                 )`,
+                [email, school.school_id, userId]
+            );
         }
 
         if (scholarRoleId && barangaysRes.rowCount > 0 && schoolsRes.rowCount > 0) {
@@ -309,11 +372,12 @@ async function seedOperationalData(dbPool = pool) {
 
             const scholarUser = await client.query(
                 `INSERT INTO "Users" (
-                    role_id, barangay_id, first_name, last_name, email, password_hash, phone_number, is_active
-                 ) VALUES ($1, $2, 'Juan', 'Dela Cruz', 'scholar.demo@grantwise.local', $3, '09174004004', TRUE)
+                    role_id, barangay_id, first_name, last_name, email, password_hash, phone_number, email_verified_at, is_active
+                 ) VALUES ($1, $2, 'Juan', 'Dela Cruz', 'scholar.demo@grantwise.local', $3, '09174004004', NOW(), TRUE)
                  ON CONFLICT (email) DO UPDATE
                  SET role_id = EXCLUDED.role_id,
                      barangay_id = EXCLUDED.barangay_id,
+                     email_verified_at = COALESCE("Users".email_verified_at, NOW()),
                      is_active = TRUE
                  RETURNING user_id`,
                 [scholarRoleId, taloto.barangay_id, passwordHash]

@@ -4,6 +4,7 @@ import {
   Building2,
   GraduationCap,
   Landmark,
+  ShieldCheck,
   UserRound,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -16,7 +17,7 @@ const portals = [
     title: "Student application portal",
     role: "Scholar / applicant",
     description:
-      "Browse open programs, submit applications, and track verification status.",
+      "Browse open programs, verify student email ownership, submit applications, and track verification status.",
   },
   {
     path: "lgu-admin",
@@ -41,6 +42,14 @@ const portals = [
     role: "Registrar",
     description:
       "School-scoped enrollment and academic verification tasks.",
+  },
+  {
+    path: "system-admin",
+    icon: ShieldCheck,
+    title: "Developer & Staff Access Control",
+    role: "System Admin",
+    description:
+      "Developer-controlled staff email allowlist, role invitations, school domain configuration, and audit logs.",
   },
 ];
 
@@ -74,8 +83,12 @@ export default function PortalDirectoryPage() {
         <strong>Staff data stays within the assigned organization.</strong>
         <p>
           Staff endpoints derive funding-unit, barangay, and school scope from
-          the authenticated database assignment. The portal directory does not
-          grant access; each backend request checks the current session and role.
+          the authenticated database assignment. Invited staff members activate
+          their accounts via{" "}
+          <Link className="text-link" to="/staff-register">
+            /staff-register
+          </Link>
+          .
         </p>
       </div>
     </div>
