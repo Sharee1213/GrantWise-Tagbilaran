@@ -70,6 +70,13 @@ const fixtureUsers = {
         email: "admin@lgu-tagbilaran.example",
         role_name: "LGU Admin",
         funding_unit_id: 41
+    },
+    developerA: {
+        user_id: 66,
+        first_name: "Developer",
+        last_name: "One",
+        email: "cuevas.sharee_angela@hnu.edu.ph",
+        role_name: "System Admin"
     }
 };
 
@@ -115,7 +122,8 @@ const tokens = {
     inactiveStudent: createToken("inactiveStudent"),
     coordinatorA: createToken("coordinatorA"),
     registrarA: createToken("registrarA"),
-    adminA: createToken("adminA")
+    adminA: createToken("adminA"),
+    developerA: createToken("developerA")
 };
 
 class FakePool {
@@ -502,6 +510,21 @@ class StaffPortalPool extends FakePool {
         this.queries ||= [];
         this.queries.push(sql);
 
+        if (sql.startsWith("SELECT preview.user_id")) {
+            return {
+                rowCount: 1,
+                rows: [{
+                    user_id: 33,
+                    first_name: "Coordinator",
+                    last_name: "One",
+                    email: "coordinator@gmail.com",
+                    role_name: "Barangay Coordinator",
+                    scope_id: 7,
+                    scope_name: "Taloto",
+                    dashboard_path: "/portal/barangay-coordinator"
+                }]
+            };
+        }
         if (sql.startsWith("SELECT COUNT(*)::INTEGER AS program_count")) {
             this.lastDashboardScope = values[0];
             return {
@@ -1104,6 +1127,34 @@ test("staff dashboards require a session and the matching server-side role", asy
         .send({ barangayId: 8 });
     assert.equal(coordinator.status, 200, JSON.stringify(dashboardApp.locals));
     assert.equal(coordinator.body.summary.pending_count, 2, JSON.stringify(coordinator.body));
+});
+
+test("developers can preview scoped staff dashboards read-only", async () => {
+    const pool = new StaffPortalPool();
+    const previewApp = staffTestApp(pool);
+
+    const preview = await request(previewApp)
+        .get("/api/coordinator/dashboard?previewRole=Barangay%20Coordinator&previewScopeId=8")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.developerA}`);
+    assert.equal(preview.status, 200, JSON.stringify(preview.body));
+    assert.equal(pool.lastQueueScope, 8);
+
+    const mismatchedRole = await request(previewApp)
+        .get("/api/coordinator/dashboard?previewRole=Registrar&previewScopeId=31")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.developerA}`);
+    assert.equal(mismatchedRole.status, 403);
+
+    const mutation = await request(previewApp)
+        .patch("/api/coordinator/verifications/601?previewRole=Barangay%20Coordinator&previewScopeId=8")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.developerA}`)
+        .send({ status: "approved" });
+    assert.equal(mutation.status, 403);
+
+    const previewOptions = await request(previewApp)
+        .get("/api/system-admin/portal-previews")
+        .set("Cookie", `${SESSION_COOKIE}=${tokens.developerA}`);
+    assert.equal(previewOptions.status, 200);
+    assert.equal(previewOptions.body.previews[0].scope_name, "Taloto");
 });
 
 test("LGU summaries and program details are restricted to the assigned funding unit", async () => {
@@ -2788,11 +2839,31 @@ test("3. Ordinary student, registrar, coordinator, or LGU admin cannot access de
     const lguToken = pool.issueSessionToken(pool.seedUser({ email: "shareerizal@admin.com", roleName: "LGU Admin", fundingUnitId: 41, staffAuthStatus: "active" }));
     const testApp = createStatefulTestApp(pool);
 
-    for (const token of [studentToken, coordToken, regToken, lguToken]) {
+    for (const [token, role] of [
+        [studentToken, "Scholar"],
+        [coordToken, "Barangay Coordinator"],
+        [regToken, "Registrar"],
+        [lguToken, "LGU Admin"]
+    ]) {
         const getRes = await request(testApp)
             .get("/api/system-admin/staff-authorizations")
             .set("Cookie", `${SESSION_COOKIE}=${token}`);
         assert.equal(getRes.status, 403);
+
+        const previewOptionsRes = await request(testApp)
+            .get("/api/system-admin/portal-previews")
+            .set("Cookie", `${SESSION_COOKIE}=${token}`);
+        assert.equal(previewOptionsRes.status, 403);
+
+        const dashboardPreviewRes = await request(testApp)
+            .get("/api/coordinator/dashboard?previewRole=Barangay%20Coordinator&previewScopeId=2")
+            .set("Cookie", `${SESSION_COOKIE}=${token}`);
+        if (role === "Barangay Coordinator") {
+            assert.equal(dashboardPreviewRes.status, 200);
+            assert.equal(dashboardPreviewRes.body.summary.pending_count, 1);
+        } else {
+            assert.equal(dashboardPreviewRes.status, 403);
+        }
 
         const postRes = await request(testApp)
             .post("/api/system-admin/staff-authorizations")

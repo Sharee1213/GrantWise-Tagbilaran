@@ -7,6 +7,7 @@
 1. **Developer / System Administrator Role (`System Admin`)**:
    - Added to `"Roles"` (`ON CONFLICT (role_name) DO NOTHING`).
    - Never granted via public registration; requires the auditable developer bootstrap procedure (`Backend/scripts/bootstrap-developer.js`).
+   - Can open active LGU Admin, Barangay Coordinator, and Registrar dashboards in read-only, scope-specific preview mode. Student portal access is not included.
 2. **Normalized & Verified User Emails**:
    - Adds `email_verified_at TIMESTAMPTZ` to `"Users"`.
    - Enforces `chk_users_email_normalized` and `uq_users_lower_email` (`LOWER(BTRIM(email))`).

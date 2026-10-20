@@ -2023,8 +2023,35 @@ function createApp({
 
     function requireRole(...roles) {
         return (req, res, next) => {
-            if (!roles.includes(req.auth.role)) {
+            if (roles.includes(req.auth.role)) {
+                return next();
+            }
+
+            const previewRole = req.query.previewRole;
+            const previewScopeId = req.query.previewScopeId;
+            if (
+                req.auth.role !== "System Admin" ||
+                req.method !== "GET" ||
+                roles.length !== 1 ||
+                previewRole !== roles[0] ||
+                !["LGU Admin", "Barangay Coordinator", "Registrar"].includes(previewRole) ||
+                typeof previewScopeId !== "string" ||
+                !/^[1-9]\d*$/.test(previewScopeId) ||
+                !Number.isSafeInteger(Number(previewScopeId))
+            ) {
                 return res.status(403).json({ message: "This account is not authorized for this resource." });
+            }
+
+            req.auth.actualRole = req.auth.role;
+            req.auth.role = previewRole;
+            req.auth.scopeId = Number(previewScopeId);
+            req.auth.scopeType = ROLE_SCOPE_TYPES[previewRole];
+            req.auth.isDeveloperPreview = true;
+            if (previewRole === "LGU Admin") {
+                req.auth.lguPermissions = {
+                    ...DEFAULT_LGU_PERMISSIONS,
+                    read_only_reports: true
+                };
             }
             return next();
         };
@@ -3730,6 +3757,70 @@ function createApp({
                         barangayCoordinators: PROPOSED_BARANGAY_COORDINATOR_DIRECTORY,
                         schoolRegistrars: PROPOSED_SCHOOL_REGISTRAR_DIRECTORY
                     }
+                });
+            } catch (error) {
+                return next(error);
+            }
+        }
+    );
+
+    app.get(
+        "/api/system-admin/portal-previews",
+        ...systemAdminMiddleware,
+        async (req, res, next) => {
+            try {
+                const result = await pool.query(
+                    `SELECT preview.user_id, preview.first_name, preview.last_name,
+                            preview.email, preview.role_name, preview.scope_id,
+                            preview.scope_name, preview.dashboard_path
+                     FROM (
+                         SELECT u.user_id, u.first_name, u.last_name, u.email,
+                                'LGU Admin'::VARCHAR AS role_name,
+                                admin.funding_unit_id AS scope_id,
+                                unit.funding_unit_name AS scope_name,
+                                '/portal/lgu-admin'::VARCHAR AS dashboard_path
+                         FROM "Users" u
+                         JOIN "LGU_Admins" admin
+                           ON admin.user_id = u.user_id AND admin.is_active = TRUE
+                         JOIN "Funding_Units" unit
+                           ON unit.funding_unit_id = admin.funding_unit_id
+                         WHERE u.is_active = TRUE
+                         UNION ALL
+                         SELECT u.user_id, u.first_name, u.last_name, u.email,
+                                'Barangay Coordinator'::VARCHAR AS role_name,
+                                coordinator.barangay_id AS scope_id,
+                                barangay.barangay_name AS scope_name,
+                                '/portal/barangay-coordinator'::VARCHAR AS dashboard_path
+                         FROM "Users" u
+                         JOIN "Barangay_Coordinators" coordinator
+                           ON coordinator.user_id = u.user_id
+                          AND coordinator.is_current = TRUE
+                          AND coordinator.term_start <= CURRENT_DATE
+                          AND (coordinator.term_end IS NULL
+                               OR coordinator.term_end >= CURRENT_DATE)
+                         JOIN "Barangays" barangay
+                           ON barangay.barangay_id = coordinator.barangay_id
+                         WHERE u.is_active = TRUE
+                         UNION ALL
+                         SELECT u.user_id, u.first_name, u.last_name, u.email,
+                                'Registrar'::VARCHAR AS role_name,
+                                registrar.school_id AS scope_id,
+                                school.school_name AS scope_name,
+                                '/portal/school-registrar'::VARCHAR AS dashboard_path
+                         FROM "Users" u
+                         JOIN "Registrars" registrar
+                           ON registrar.user_id = u.user_id AND registrar.is_active = TRUE
+                         JOIN "Schools" school ON school.school_id = registrar.school_id
+                         WHERE u.is_active = TRUE
+                     ) preview
+                     ORDER BY preview.role_name, preview.scope_name,
+                              preview.last_name, preview.first_name`
+                );
+                return res.json({
+                    previews: result.rows.map((row) => ({
+                        ...row,
+                        displayName: `${row.first_name} ${row.last_name}`.trim()
+                    }))
                 });
             } catch (error) {
                 return next(error);

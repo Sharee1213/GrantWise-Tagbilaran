@@ -77,6 +77,7 @@ export default function StaffAccessManagementPage() {
     },
   });
   const [authorizations, setAuthorizations] = useState([]);
+  const [portalPreviews, setPortalPreviews] = useState([]);
   const [schoolDomains, setSchoolDomains] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -121,16 +122,18 @@ export default function StaffAccessManagementPage() {
   const loadSystemAdminData = useCallback(async () => {
     setError(null);
     try {
-      const [lookupData, authData, domainData, auditData] = await Promise.all([
+      const [lookupData, authData, domainData, auditData, previewData] = await Promise.all([
         apiRequest("system-admin/lookups"),
         apiRequest("system-admin/staff-authorizations"),
         apiRequest("system-admin/school-domains"),
         apiRequest("system-admin/audit-logs"),
+        apiRequest("system-admin/portal-previews"),
       ]);
       setLookups((current) => ({ ...current, ...lookupData }));
       setAuthorizations(authData.authorizations || []);
       setSchoolDomains(domainData.schoolDomains || []);
       setAuditLogs(auditData.auditLogs || []);
+      setPortalPreviews(previewData.previews || []);
     } catch (requestError) {
       setError({
         status: requestError.status,
@@ -450,6 +453,44 @@ export default function StaffAccessManagementPage() {
         title="Staff Email Allowlist, Invitations & School Scopes."
         description="Authorize specific staff email addresses, bind each invitation to a single role and organizational scope (funding unit, barangay, or school), manage verified school domains, and audit access changes."
       />
+
+      {identityState === "ready" && (
+        <section className="staff-panel">
+          <h2>Preview staff dashboards</h2>
+          <p>
+            Open an active LGU Admin, Barangay Coordinator, or Registrar
+            dashboard in read-only mode.
+          </p>
+          {portalPreviews.length === 0 ? (
+            <p className="staff-empty">No active staff assignments are available to preview.</p>
+          ) : (
+            <div className="staff-record-list">
+              {portalPreviews.map((preview) => {
+                const query = new URLSearchParams({
+                  previewRole: preview.role_name,
+                  previewScopeId: String(preview.scope_id),
+                  previewName: preview.displayName,
+                });
+                return (
+                  <article className="staff-record" key={`${preview.role_name}-${preview.user_id}`}>
+                    <div>
+                      <strong>{preview.displayName}</strong>
+                      <p>{preview.email} · {preview.role_name}</p>
+                      <p>{preview.scope_name}</p>
+                    </div>
+                    <Link
+                      className="text-link"
+                      to={`${preview.dashboard_path}?${query.toString()}`}
+                    >
+                      Open read-only dashboard
+                    </Link>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {identityState === "loading" && (
         <p role="status">Verifying System Admin session...</p>

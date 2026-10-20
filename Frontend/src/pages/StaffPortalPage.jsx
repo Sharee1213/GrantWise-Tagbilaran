@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, RefreshCw } from "lucide-react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
 import { apiRequest } from "../services/api.js";
 
@@ -74,9 +74,20 @@ function ErrorNotice({ error }) {
 
 export default function StaffPortalPage() {
   const { portalType } = useParams();
+  const [searchParams] = useSearchParams();
   const portal = portalDetails[portalType];
+  const previewRole = searchParams.get("previewRole");
+  const previewScopeId = Number(searchParams.get("previewScopeId"));
+  const hasDeveloperPreview = Boolean(
+    portal &&
+      previewRole === portal.role &&
+      Number.isSafeInteger(previewScopeId) &&
+      previewScopeId > 0,
+  );
+  const previewDisplayName = searchParams.get("previewName");
   const [identityState, setIdentityState] = useState("loading");
   const [authorized, setAuthorized] = useState(false);
+  const [developerPreview, setDeveloperPreview] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -102,6 +113,18 @@ export default function StaffPortalPage() {
   });
   const [selectedDetail, setSelectedDetail] = useState(null);
 
+  const requestPortalData = useCallback(
+    (path, options) => {
+      if (!hasDeveloperPreview) return apiRequest(path, options);
+      const params = new URLSearchParams({
+        previewRole: portal.role,
+        previewScopeId: String(previewScopeId),
+      });
+      return apiRequest(`${path}?${params.toString()}`, options);
+    },
+    [hasDeveloperPreview, portal, previewScopeId],
+  );
+
   const loadPortalData = useCallback(async () => {
     if (!portal) return;
     setError(null);
@@ -109,11 +132,11 @@ export default function StaffPortalPage() {
       if (portal.base === "admin") {
         const [dashboard, programs, applications, fundingCycles, queue, lookups] =
           await Promise.all([
-            apiRequest("admin/dashboard"),
-            apiRequest("admin/programs"),
-            apiRequest("admin/applications"),
-            apiRequest("admin/funding-cycles"),
-            apiRequest("admin/verifications"),
+            requestPortalData("admin/dashboard"),
+            requestPortalData("admin/programs"),
+            requestPortalData("admin/applications"),
+            requestPortalData("admin/funding-cycles"),
+            requestPortalData("admin/verifications"),
             apiRequest("lookups"),
           ]);
         setData({
@@ -126,8 +149,8 @@ export default function StaffPortalPage() {
         });
       } else {
         const [dashboard, queue] = await Promise.all([
-          apiRequest(`${portal.base}/dashboard`),
-          apiRequest(`${portal.base}/verifications`),
+          requestPortalData(`${portal.base}/dashboard`),
+          requestPortalData(`${portal.base}/verifications`),
         ]);
         setData({ ...dashboard, ...queue });
       }
@@ -146,12 +169,13 @@ export default function StaffPortalPage() {
       });
       setData(null);
     }
-  }, [portal]);
+  }, [portal, requestPortalData]);
 
   useEffect(() => {
     let active = true;
     setIdentityState("loading");
     setAuthorized(false);
+    setDeveloperPreview(false);
     setData(null);
     setError(null);
     if (!portal) {
@@ -163,7 +187,9 @@ export default function StaffPortalPage() {
     apiRequest("auth/me")
       .then(({ user }) => {
         if (!active) return;
-        if (user.role !== portal.role) {
+        const isDeveloperPreview =
+          user.role === "System Admin" && hasDeveloperPreview;
+        if (user.role !== portal.role && !isDeveloperPreview) {
           setIdentityState("forbidden");
           setError({
             status: 403,
@@ -172,6 +198,7 @@ export default function StaffPortalPage() {
           });
           return;
         }
+        setDeveloperPreview(isDeveloperPreview);
         setAuthorized(true);
         setIdentityState("ready");
       })
@@ -192,7 +219,7 @@ export default function StaffPortalPage() {
     return () => {
       active = false;
     };
-  }, [portal]);
+  }, [hasDeveloperPreview, portal]);
 
   useEffect(() => {
     if (identityState === "ready" && authorized) {
@@ -359,7 +386,11 @@ export default function StaffPortalPage() {
     setError(null);
     try {
       const result = await apiRequest(
-        `registrar/verifications/${verificationId}`,
+        `registrar/verifications/${verificationId}${
+          hasDeveloperPreview
+            ? `?previewRole=${encodeURIComponent(portal.role)}&previewScopeId=${previewScopeId}`
+            : ""
+        }`,
       );
       setSelectedDetail(result);
     } catch (requestError) {
@@ -422,7 +453,11 @@ export default function StaffPortalPage() {
         description={portal.description}
       />
       <div className="staff-toolbar">
-        <span>Access is checked against your active server-side assignment.</span>
+        <span>
+          {developerPreview
+            ? `Developer preview · read-only · ${previewDisplayName || portal.role}`
+            : "Access is checked against your active server-side assignment."}
+        </span>
         {authorized && (
           <button
             className="button button-secondary"
@@ -435,6 +470,17 @@ export default function StaffPortalPage() {
           </button>
         )}
       </div>
+
+      {developerPreview && (
+        <section className="staff-notice" role="note">
+          <strong>Read-only developer preview</strong>
+          <p>
+            You are viewing the {portal.role} dashboard for{" "}
+            {previewDisplayName || `scope #${previewScopeId}`}. Changes and
+            student portal access are disabled in this preview.
+          </p>
+        </section>
+      )}
 
       {identityState === "loading" && (
         <p role="status" className="staff-loading">Checking your staff session...</p>
@@ -481,7 +527,7 @@ export default function StaffPortalPage() {
                         {formatMoney(program.reserved_budget)} · Released{" "}
                         {formatMoney(program.released_budget)}
                       </p>
-                      <div className="staff-allocation-editor">
+                      <div className="staff-allocation-editor" hidden={developerPreview}>
                         <strong>Barangay allocations</strong>
                         {allocationsFor(program).map((allocation, index) => (
                           <div
@@ -564,6 +610,7 @@ export default function StaffPortalPage() {
                       type="button"
                       onClick={() => changeProgramStatus(program)}
                       disabled={busy || program.status === "closed"}
+                      hidden={developerPreview}
                     >
                       {program.status === "active" ? "Pause" : "Activate"}
                     </button>
@@ -573,7 +620,7 @@ export default function StaffPortalPage() {
             )}
           </section>
 
-          <section className="staff-panel">
+          {!developerPreview && <section className="staff-panel">
             <h2>Create a program</h2>
             {data.fundingCycles.length === 0 ? (
               <p className="staff-empty">
@@ -653,7 +700,7 @@ export default function StaffPortalPage() {
                 </button>
               </form>
             )}
-          </section>
+          </section>}
 
           <section className="staff-panel">
             <h2>Applications for your funding unit</h2>
@@ -762,6 +809,7 @@ export default function StaffPortalPage() {
                         ))}
                         <form
                           className="staff-form staff-academic-form"
+                          hidden={developerPreview}
                           onSubmit={(event) => {
                             event.preventDefault();
                             saveAcademicRecord(verification, "grade-report");
@@ -823,6 +871,7 @@ export default function StaffPortalPage() {
                         </form>
                         <form
                           className="staff-form staff-academic-form"
+                          hidden={developerPreview}
                           onSubmit={(event) => {
                             event.preventDefault();
                             saveAcademicRecord(verification, "eligibility-check");
@@ -871,7 +920,7 @@ export default function StaffPortalPage() {
                         </form>
                       </div>
                     )}
-                  <label className="staff-field">
+                  {!developerPreview && <label className="staff-field">
                     Review notes
                     <textarea
                       maxLength={2000}
@@ -881,8 +930,8 @@ export default function StaffPortalPage() {
                         [verification.verification_id]: event.target.value,
                       })}
                     />
-                  </label>
-                  {portal.base === "admin" && (
+                  </label>}
+                  {!developerPreview && portal.base === "admin" && (
                     <label className="staff-field staff-award-field">
                       Award amount (PHP, required to approve)
                       <input
@@ -897,7 +946,7 @@ export default function StaffPortalPage() {
                       />
                     </label>
                   )}
-                  <div className="staff-actions">
+                  {!developerPreview && <div className="staff-actions">
                     <button
                       className="button button-primary"
                       type="button"
@@ -926,7 +975,7 @@ export default function StaffPortalPage() {
                     >
                       Reject
                     </button>
-                  </div>
+                  </div>}
                 </article>
               ))}
             </div>
