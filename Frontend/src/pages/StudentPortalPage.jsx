@@ -1,7 +1,31 @@
 import React, { useEffect, useState } from "react";
-import { CheckCircle2, KeyRound, MailCheck, ShieldAlert } from "lucide-react";
+import {
+  AlertCircle,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  FileCheck,
+  FileText,
+  GraduationCap,
+  KeyRound,
+  MailCheck,
+  RefreshCw,
+  School,
+  Send,
+  ShieldAlert,
+  User,
+  UserCheck,
+} from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
+import StatCard from "../components/StatCard.jsx";
+import StatusBadge from "../components/StatusBadge.jsx";
+import ApplicationTimeline from "../components/ApplicationTimeline.jsx";
+import ModalDialog from "../components/ModalDialog.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import LoadingSkeleton from "../components/LoadingSkeleton.jsx";
 import { getPortalPathForRole } from "./LoginPage.jsx";
 import { apiRequest } from "../services/api.js";
 
@@ -26,60 +50,64 @@ export default function StudentPortalPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  // Email verification state
   const [verificationTokenInput, setVerificationTokenInput] = useState(
     () => searchParams.get("verifyToken") || "",
   );
   const [issuedDevToken, setIssuedDevToken] = useState("");
   const [verifyingEmail, setVerifyingEmail] = useState(false);
   const [resendingVerification, setResendingVerification] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+
+  // Apply confirmation dialog
+  const [confirmApplyProgram, setConfirmApplyProgram] = useState(null);
 
   const navigate = useNavigate();
 
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      try {
-        const { user } = await apiRequest("auth/me");
-        if (user.role !== "Scholar") {
-          navigate(getPortalPathForRole(user.role), { replace: true });
-          return;
-        }
-        const [programData, applicationData, profileData] = await Promise.all([
-          apiRequest("programs"),
-          apiRequest("student/applications"),
-          apiRequest("student/profile").catch(() => ({ profile: null })),
-        ]);
-        if (active) {
-          setCurrentUser(user);
-          setPrograms(programData.programs || []);
-          setApplicationSubmissionEnabled(
-            programData.applicationSubmissionEnabled === true,
-          );
-          setApplications(applicationData.applications || []);
-          setProfile(profileData?.profile || null);
-        }
-      } catch (requestError) {
-        if (active && requestError.status === 401) {
-          const programId = searchParams.get("programId");
-          navigate(programId ? `/login?programId=${encodeURIComponent(programId)}` : "/login", {
-            replace: true,
-          });
-        } else if (active) {
-          setError(requestError.message || "Could not load your student portal.");
-        }
-      } finally {
-        if (active) setLoading(false);
+  async function loadData() {
+    setLoading(true);
+    try {
+      const { user } = await apiRequest("auth/me");
+      if (user.role !== "Scholar") {
+        navigate(getPortalPathForRole(user.role), { replace: true });
+        return;
       }
+      const [programData, applicationData, profileData] = await Promise.all([
+        apiRequest("programs"),
+        apiRequest("student/applications"),
+        apiRequest("student/profile").catch(() => ({ profile: null })),
+      ]);
+
+      setCurrentUser(user);
+      setPrograms(programData.programs || []);
+      setApplicationSubmissionEnabled(
+        programData.applicationSubmissionEnabled === true,
+      );
+      setApplications(applicationData.applications || []);
+      setProfile(profileData?.profile || null);
+    } catch (requestError) {
+      if (requestError.status === 401) {
+        const programId = searchParams.get("programId");
+        navigate(programId ? `/login?programId=${encodeURIComponent(programId)}` : "/login", {
+          replace: true,
+        });
+      } else {
+        setError(requestError.message || "Could not load your student portal.");
+      }
+    } finally {
+      setLoading(false);
     }
-    load();
-    return () => {
-      active = false;
-    };
+  }
+
+  useEffect(() => {
+    loadData();
   }, [navigate, searchParams]);
 
   async function refreshApplications() {
-    const data = await apiRequest("student/applications");
-    setApplications(data.applications || []);
+    try {
+      const data = await apiRequest("student/applications");
+      setApplications(data.applications || []);
+    } catch {}
   }
 
   async function handleRequestVerificationToken() {
@@ -99,7 +127,7 @@ export default function StudentPortalPage() {
       }
       setNotice(
         result.message ||
-          "Verification token generated. Enter the token below to verify your email ownership.",
+          "Verification token generated. Enter the token below to confirm email ownership.",
       );
     } catch (requestError) {
       setError(
@@ -112,12 +140,12 @@ export default function StudentPortalPage() {
   }
 
   async function handleVerifyEmail(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
     setError("");
     setNotice("");
     const trimmedToken = verificationTokenInput.trim();
     if (!trimmedToken) {
-      setError("Enter your email verification token.");
+      setError("Please enter your verification token.");
       return;
     }
     setVerifyingEmail(true);
@@ -133,41 +161,24 @@ export default function StudentPortalPage() {
       setCurrentUser(refreshed.user || currentUser);
       setIssuedDevToken("");
       setVerificationTokenInput("");
+      setEmailModalOpen(false);
       setNotice(
         result.message ||
-          "Email ownership verified. Note: School Registrar enrollment verification is still completed separately by your school registrar.",
+          "Email ownership verified! Your account is now confirmed.",
       );
     } catch (requestError) {
       setError(
         requestError.message ||
-          "Email verification failed. Check that your token is valid and has not expired.",
+          "Email verification failed. Check that your token is valid and unexpired.",
       );
     } finally {
       setVerifyingEmail(false);
     }
   }
 
-  async function submitApplication(event) {
-    event.preventDefault();
+  async function executeSubmitApplication(numericProgramId) {
     setError("");
     setNotice("");
-
-    const numericProgramId = Number(selectedProgramId);
-    if (!Number.isSafeInteger(numericProgramId) || numericProgramId < 1) {
-      setError("Please select a valid open scholarship program.");
-      return;
-    }
-
-    const alreadyApplied = applications.some(
-      (app) =>
-        Number(app.program_id) === numericProgramId &&
-        app.application_status !== "withdrawn",
-    );
-    if (alreadyApplied) {
-      setError("You already have an active application for this program.");
-      return;
-    }
-
     setSubmitting(true);
     try {
       const result = await apiRequest("student/applications", {
@@ -176,11 +187,10 @@ export default function StudentPortalPage() {
       });
       await refreshApplications();
       setNotice(
-        `Application submitted. Current status: ${statusLabel(
-          result.application.application_status,
-        )}.`,
+        `Application submitted successfully! Your application is now queued for municipal review.`,
       );
       setSelectedProgramId("");
+      setConfirmApplyProgram(null);
     } catch (requestError) {
       setError(requestError.message || "Could not submit your application.");
     } finally {
@@ -206,7 +216,7 @@ export default function StudentPortalPage() {
         [applicationId]: result,
       }));
     } catch (requestError) {
-      setError(requestError.message || "Could not load application status.");
+      setError(requestError.message || "Could not load application verification records.");
     } finally {
       setLoadingDetail(null);
     }
@@ -222,257 +232,349 @@ export default function StudentPortalPage() {
   );
 
   return (
-    <div className="page-container information-page">
-      <PageHeading
-        eyebrow="STUDENT APPLICATION PORTAL"
-        title="Your applications."
-        description="Submit an application to an open program and track its verification stages here."
-      />
+    <div className="student-portal-workspace">
+      {/* Workspace Header */}
+      <div className="workspace-header">
+        <div>
+          <PageHeading
+            eyebrow="STUDENT SCHOLAR PORTAL"
+            title="Scholarship Portal & Applications"
+            description="Apply for open educational assistance programs, track multi-stage municipal verification, and view grant awards."
+          />
+        </div>
+        <div className="workspace-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={loadData}
+            disabled={loading}
+          >
+            <RefreshCw size={15} className={loading ? "spin" : ""} aria-hidden="true" />
+            <span>Refresh Portal</span>
+          </button>
+        </div>
+      </div>
 
-      {loading && <p role="status">Loading your applications...</p>}
+      {/* Notices */}
       {error && (
-        <div role="alert" className="auth-banner auth-banner-error">
+        <div className="staff-notice staff-notice-error" role="alert">
+          <AlertCircle size={18} aria-hidden="true" />
           <div>
-            <strong>Application notice</strong>
+            <strong>Application Notice</strong>
             <p>{error}</p>
           </div>
         </div>
       )}
+
       {notice && (
-        <div role="status" className="auth-banner auth-banner-success">
-          <div>
-            <strong>Portal update</strong>
-            <p>{notice}</p>
-          </div>
+        <div className="staff-notice staff-notice-success" role="status">
+          <CheckCircle2 size={18} aria-hidden="true" />
+          <p>{notice}</p>
         </div>
       )}
 
+      {loading && <LoadingSkeleton type="stats" />}
+
       {!loading && (
-        <>
-          {profile && (
-            <section className="student-profile-summary">
-              <div>
-                <span className="eyebrow">SCHOLAR PROFILE</span>
-                <h2>
-                  {profile.first_name} {profile.last_name}
-                </h2>
-                <p>
-                  {profile.school_name} · {profile.course}
-                  {profile.year_level ? ` (${profile.year_level})` : ""}
-                </p>
+        <div className="workspace-body">
+          {/* Scholar Profile Card */}
+          <div className="student-profile-hero">
+            <div className="profile-hero-left">
+              <div className="profile-hero-avatar">
+                {currentUser?.firstName?.charAt(0) || "S"}
               </div>
-              <div className="student-profile-meta">
-                <span>
-                  <strong>Student ID:</strong> {profile.student_number}
-                </span>
-                {profile.barangay_name && (
-                  <span>
-                    <strong>Barangay:</strong> {profile.barangay_name}
-                  </span>
-                )}
-                <span>
-                  <strong>Email Ownership:</strong>{" "}
-                  {currentUser?.emailVerified ? "Verified" : "Unverified"}
-                </span>
-              </div>
-            </section>
-          )}
-
-          {currentUser && !currentUser.emailVerified && (
-            <section className="instruction-main">
-              <p className="eyebrow">SCHOOL / STUDENT EMAIL OWNERSHIP VERIFICATION</p>
-              <h2>Verify control of {currentUser.email}.</h2>
-              <p className="field-hint">
-                <ShieldAlert size={15} aria-hidden="true" /> Verifying your
-                email address confirms that you control this email account. It{" "}
-                <strong>does not</strong> replace School Registrar enrollment
-                verification or Barangay Coordinator residency verification.
-              </p>
-
-              {issuedDevToken && (
-                <div role="status" className="auth-banner auth-banner-success">
-                  <KeyRound size={18} aria-hidden="true" />
-                  <div>
-                    <strong>Development / Manual Verification Token Issued</strong>
-                    <p>
-                      Automated email sending is disabled in this environment (
-                      <code>EMAIL_VERIFICATION_ENABLED=false</code>). Use this
-                      one-time token to verify your email ownership:{" "}
-                      <code>{issuedDevToken}</code>
-                    </p>
-                  </div>
+              <div className="profile-hero-details">
+                <div className="flex items-center gap-2">
+                  <h2 className="profile-hero-name">
+                    {currentUser?.firstName} {currentUser?.lastName}
+                  </h2>
+                  <span className="profile-hero-badge">Scholar / Applicant</span>
                 </div>
-              )}
-
-              <form onSubmit={handleVerifyEmail} className="auth-form">
-                <div className="form-field">
-                  <label className="form-label" htmlFor="student-verify-token">
-                    Single-use verification token
-                  </label>
-                  <input
-                    id="student-verify-token"
-                    className="form-input"
-                    placeholder="Paste your email verification token"
-                    value={verificationTokenInput}
-                    onChange={(e) => setVerificationTokenInput(e.target.value)}
-                    disabled={verifyingEmail}
-                  />
+                <div className="profile-hero-meta">
+                  <span>Student ID: <strong>{profile?.student_number || "Not assigned"}</strong></span>
+                  <span>·</span>
+                  <span>School: <strong>{profile?.school_name || "Tagbilaran Institution"}</strong></span>
+                  <span>·</span>
+                  <span>Residency: <strong>Brgy. {profile?.barangay_name || "Tagbilaran"}</strong></span>
+                  <span>·</span>
+                  <span>Curriculum: <strong>{profile?.course || "College"} ({profile?.year_level || "1st Year"})</strong></span>
                 </div>
-                <div className="staff-actions">
-                  <button
-                    type="submit"
-                    className="button button-primary"
-                    disabled={verifyingEmail || !verificationTokenInput.trim()}
-                  >
-                    <MailCheck size={15} aria-hidden="true" />{" "}
-                    {verifyingEmail ? "Verifying..." : "Verify email ownership"}
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={handleRequestVerificationToken}
-                    disabled={resendingVerification}
-                  >
-                    {resendingVerification
-                      ? "Generating token..."
-                      : "Send / generate verification token"}
-                  </button>
-                </div>
-              </form>
-            </section>
-          )}
-
-          {currentUser?.emailVerified && (
-            <div role="status" className="auth-banner auth-banner-success">
-              <CheckCircle2 size={18} aria-hidden="true" />
-              <div>
-                <strong>Email ownership verified ({currentUser.email})</strong>
-                <p>
-                  Your email address ownership is verified. School Registrar
-                  enrollment verification and Barangay residency verification
-                  are still performed independently on each scholarship
-                  application.
-                </p>
               </div>
             </div>
-          )}
 
-          <section className="instruction-main">
-            <p className="eyebrow">NEW APPLICATION</p>
-            <h2>Apply to an open program.</h2>
-            {!applicationSubmissionEnabled ? (
-              <p>
-                New applications are unavailable until the required funding and
-                verification database schema is installed.
-              </p>
-            ) : openPrograms.length === 0 ? (
-              <p>There are no programs currently accepting applications.</p>
-            ) : (
-              <form onSubmit={submitApplication} className="auth-form">
-                <div className="form-field">
-                  <label className="form-label" htmlFor="application-program">
-                    Select a program
-                  </label>
-                  <select
-                    id="application-program"
-                    className="form-input"
-                    value={selectedProgramId}
-                    onChange={(event) => setSelectedProgramId(event.target.value)}
-                    required
-                  >
-                    <option value="">Choose an open program</option>
-                    {openPrograms.map((program) => {
-                      const alreadyApplied = appliedProgramIds.has(
-                        Number(program.program_id),
-                      );
-                      return (
-                        <option
-                          key={program.program_id}
-                          value={program.program_id}
-                          disabled={alreadyApplied}
-                        >
-                          {program.program_name} ({program.cycle_code})
-                          {alreadyApplied ? " — Already applied" : ""}
-                        </option>
-                      );
-                    })}
-                  </select>
+            <div className="profile-hero-right">
+              {currentUser?.emailVerified ? (
+                <div className="email-status-pill verified">
+                  <MailCheck size={16} aria-hidden="true" />
+                  <span>Email Verified</span>
                 </div>
-                <p className="field-hint">
-                  GrantWise initiates the multi-stage verification workflow
-                  (Barangay Coordinator → School Registrar → LGU Admin). Confirm
-                  documentary requirements with the funding unit before applying.
-                </p>
+              ) : (
                 <button
-                  className="button button-primary"
-                  disabled={submitting || !selectedProgramId}
-                  type="submit"
+                  type="button"
+                  className="button button-outline button-sm text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                  onClick={() => setEmailModalOpen(true)}
                 >
-                  {submitting ? "Submitting..." : "Submit application"}
+                  <KeyRound size={14} aria-hidden="true" />
+                  <span>Verify Student Email</span>
                 </button>
-              </form>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Metrics */}
+          <div className="stats-grid-4">
+            <StatCard
+              title="Active Applications"
+              value={applications.length}
+              subtext="Under municipal review"
+              icon={FileText}
+            />
+            <StatCard
+              title="Open Programs"
+              value={openPrograms.length}
+              subtext="Currently accepting applications"
+              icon={GraduationCap}
+              variant="success"
+            />
+            <StatCard
+              title="Approved Awards"
+              value={applications.filter((a) => a.application_status === "approved").length}
+              subtext="Committed scholarship grants"
+              icon={CheckCircle2}
+              variant="success"
+            />
+            <StatCard
+              title="Submission Status"
+              value={applicationSubmissionEnabled ? "Active" : "Closed"}
+              subtext="Online portal engine"
+              icon={Send}
+              variant={applicationSubmissionEnabled ? "info" : "default"}
+            />
+          </div>
+
+          {/* SECTION: MY APPLICATIONS */}
+          <section className="staff-panel" id="overview">
+            <div className="panel-title-bar">
+              <div>
+                <h2>My Scholarship Applications</h2>
+                <p className="text-muted text-xs">
+                  Review the real-time lifecycle stages for all your submitted applications.
+                </p>
+              </div>
+            </div>
+
+            {applications.length === 0 ? (
+              <EmptyState
+                icon={FileCheck}
+                title="No applications submitted yet"
+                description="Explore the open programs below and submit your first scholarship application."
+              />
+            ) : (
+              <div className="space-y-6">
+                {applications.map((app) => {
+                  const detail = details[app.application_id];
+                  const isLoadingThis = loadingDetail === app.application_id;
+
+                  return (
+                    <div key={app.application_id} className="application-scholar-card">
+                      <div className="app-card-top">
+                        <div>
+                          <span className="app-card-eyebrow">APPLICATION #{app.application_id}</span>
+                          <h3 className="app-card-title">{app.program_name}</h3>
+                          <div className="app-card-meta">
+                            <span>Cycle: {app.funding_cycle || "Current"}</span>
+                            <span>·</span>
+                            <span>Submitted: {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString("en-PH") : "Draft"}</span>
+                            <span>·</span>
+                            <span>Barangay: Brgy. {app.barangay_name || profile?.barangay_name}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <StatusBadge status={app.application_status} />
+                          <button
+                            type="button"
+                            className="button button-outline button-sm"
+                            onClick={() => toggleDetails(app.application_id)}
+                            disabled={isLoadingThis}
+                          >
+                            {isLoadingThis
+                              ? "Loading..."
+                              : detail
+                                ? "Hide Details"
+                                : "View Verification Trail"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Visual Timeline Stepper */}
+                      <ApplicationTimeline
+                        status={app.application_status}
+                        submittedAt={app.submitted_at}
+                        reviewedAt={app.reviewed_at}
+                        remarks={app.remarks}
+                        verifications={detail?.verifications || []}
+                      />
+
+                      {/* Expanded Details Drawer */}
+                      {detail && (
+                        <div className="app-card-details-expanded">
+                          <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-3">
+                            Verification Breakdown & Audit
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {(detail.verifications || []).map((v) => (
+                              <div key={v.verification_type} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs">
+                                <div className="flex justify-between items-center mb-1">
+                                  <strong className="capitalize">{v.verification_type} Verification</strong>
+                                  <StatusBadge status={v.status} type="verification" />
+                                </div>
+                                <p className="text-muted m-0">
+                                  {v.remarks ? `"${v.remarks}"` : "Pending reviewer remarks."}
+                                </p>
+                                {v.reviewed_at && (
+                                  <span className="text-[10px] text-muted block mt-1">
+                                    {new Date(v.reviewed_at).toLocaleString("en-PH")}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </section>
 
-          <section className="information-section">
-            <div className="section-heading compact-heading">
+          {/* SECTION: OPEN SCHOLARSHIP PROGRAMS */}
+          <section className="staff-panel" id="programs">
+            <div className="panel-title-bar">
               <div>
-                <p className="eyebrow">APPLICATION STATUS</p>
-                <h2>Track your submissions.</h2>
+                <h2>Available Tagbilaran Scholarship Programs</h2>
+                <p className="text-muted text-xs">
+                  Programs currently open for application from participating funding units.
+                </p>
               </div>
             </div>
-            {applications.length === 0 ? (
-              <p>You have not submitted any applications yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {applications.map((application) => (
-                  <article className="pillar-card" key={application.application_id}>
-                    <h3>{application.program_name}</h3>
-                    <p>
-                      Status: <strong>{statusLabel(application.application_status)}</strong>
-                      {application.cycle_code ? ` · ${application.cycle_code}` : ""}
-                    </p>
-                    {application.submitted_at && (
-                      <p>
-                        Submitted:{" "}
-                        {new Intl.DateTimeFormat(undefined, {
-                          dateStyle: "medium",
-                        }).format(new Date(application.submitted_at))}
-                      </p>
-                    )}
-                    <button
-                      className="text-link"
-                      type="button"
-                      onClick={() => toggleDetails(application.application_id)}
-                      disabled={loadingDetail === application.application_id}
-                    >
-                      {loadingDetail === application.application_id
-                        ? "Loading status..."
-                        : details[application.application_id]
-                          ? "Hide verification details"
-                          : "View verification details"}
-                    </button>
-                    {details[application.application_id] && (
-                      <ul className="verification-stage-list">
-                        {details[application.application_id].verifications.map((item) => (
-                          <li key={item.verification_type}>
-                            <strong>{statusLabel(item.verification_type)}:</strong>{" "}
-                            <span>{statusLabel(item.status)}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {openPrograms.map((prog) => {
+                const isAlreadyApplied = appliedProgramIds.has(Number(prog.program_id));
+                return (
+                  <div key={prog.program_id} className="program-scholar-card">
+                    <div className="program-scholar-badge">
+                      <GraduationCap size={16} />
+                      <span>{prog.funding_unit_name || "LGU Tagbilaran"}</span>
+                    </div>
+
+                    <h3 className="program-scholar-title">{prog.program_name}</h3>
+                    <p className="program-scholar-cycle">Cycle: {prog.funding_cycle || "2026"}</p>
+
+                    <div className="program-scholar-dates">
+                      <Calendar size={13} aria-hidden="true" />
+                      <span>
+                        {prog.start_date ? new Date(prog.start_date).toLocaleDateString("en-PH") : "Open"} –{" "}
+                        {prog.end_date ? new Date(prog.end_date).toLocaleDateString("en-PH") : "Open until filled"}
+                      </span>
+                    </div>
+
+                    <div className="program-scholar-footer">
+                      {isAlreadyApplied ? (
+                        <div className="already-applied-pill">
+                          <CheckCircle2 size={14} />
+                          <span>Application Submitted</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-primary button-sm w-full"
+                          onClick={() => setConfirmApplyProgram(prog)}
+                          disabled={!applicationSubmissionEnabled || submitting}
+                        >
+                          <Send size={14} aria-hidden="true" />
+                          <span>Apply for Program</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </section>
-        </>
+        </div>
       )}
 
-      <div className="page-actions">
-        <Link className="text-link" to="/programs">Browse programs</Link>
-      </div>
+      {/* =====================================================================
+         MODAL: EMAIL VERIFICATION
+         ===================================================================== */}
+      <ModalDialog
+        isOpen={emailModalOpen}
+        onClose={() => setEmailModalOpen(false)}
+        title="Verify Student Email Ownership"
+        subtitle={`Verifying ownership for ${currentUser?.email}`}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleVerifyEmail} className="space-y-4">
+          <p className="text-xs text-muted leading-relaxed">
+            GrantWise sends a verification token to verify your school or personal Gmail account. This confirms account ownership; your school registrar performs academic verification separately.
+          </p>
+
+          <div className="form-field">
+            <label className="form-label">Verification Token</label>
+            <input
+              required
+              placeholder="Paste 64-character token"
+              value={verificationTokenInput}
+              onChange={(e) => setVerificationTokenInput(e.target.value)}
+            />
+          </div>
+
+          {issuedDevToken && (
+            <div className="p-3 rounded-lg bg-[var(--hover-bg)] border border-[var(--border-color)] text-xs font-mono break-all">
+              <span className="text-muted block text-[10px]">Development Token:</span>
+              {issuedDevToken}
+            </div>
+          )}
+
+          <div className="flex justify-between items-center pt-2">
+            <button
+              type="button"
+              className="button button-outline button-sm"
+              onClick={handleRequestVerificationToken}
+              disabled={resendingVerification}
+            >
+              {resendingVerification ? "Generating..." : "Generate New Token"}
+            </button>
+
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={verifyingEmail || !verificationTokenInput.trim()}
+            >
+              {verifyingEmail ? "Verifying..." : "Verify Ownership"}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* =====================================================================
+         CONFIRMATION DIALOG: APPLY FOR PROGRAM
+         ===================================================================== */}
+      {confirmApplyProgram && (
+        <ConfirmDialog
+          isOpen={Boolean(confirmApplyProgram)}
+          onClose={() => setConfirmApplyProgram(null)}
+          onConfirm={() => executeSubmitApplication(Number(confirmApplyProgram.program_id))}
+          title="Submit Scholarship Application"
+          message={`Are you ready to submit your application for '${confirmApplyProgram.program_name}'? Your verified student profile and residency credentials will be forwarded to your Barangay Coordinator and School Registrar.`}
+          confirmText="Confirm & Submit Application"
+          variant="primary"
+          busy={submitting}
+        />
+      )}
     </div>
   );
 }

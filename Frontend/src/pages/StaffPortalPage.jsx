@@ -1,90 +1,59 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Eye,
+  FileCheck,
+  FileText,
+  GraduationCap,
+  Landmark,
+  Plus,
+  RefreshCw,
+  School,
+  ShieldCheck,
+  UserCheck,
+  Users,
+  XCircle,
+} from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
+import StatCard from "../components/StatCard.jsx";
+import StatusBadge from "../components/StatusBadge.jsx";
+import DataTable from "../components/DataTable.jsx";
+import FundingSummary, { formatPhp } from "../components/FundingSummary.jsx";
+import ModalDialog from "../components/ModalDialog.jsx";
+import ConfirmDialog from "../components/ConfirmDialog.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import LoadingSkeleton from "../components/LoadingSkeleton.jsx";
+import { getPortalStrategy } from "../strategies/portalStrategies.js";
 import { apiRequest } from "../services/api.js";
-
-const portalDetails = {
-  "lgu-admin": {
-    role: "LGU Admin",
-    eyebrow: "LGU PROGRAM ADMIN",
-    title: "Program oversight, within scope.",
-    description:
-      "Manage your assigned funding unit's programs, review applications, and monitor its funding.",
-    base: "admin",
-  },
-  "barangay-coordinator": {
-    role: "Barangay Coordinator",
-    eyebrow: "BARANGAY COORDINATOR",
-    title: "Local verification, securely scoped.",
-    description:
-      "Review applications associated with your currently assigned barangay.",
-    base: "coordinator",
-  },
-  "school-registrar": {
-    role: "Registrar",
-    eyebrow: "SCHOOL REGISTRAR",
-    title: "Academic verification, by school.",
-    description:
-      "Review applications for your assigned school using the academic records available to GrantWise.",
-    base: "registrar",
-  },
-};
 
 function displayStatus(value) {
   return String(value || "")
     .replaceAll("_", " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatMoney(value) {
-  return new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    maximumFractionDigits: 2,
-  }).format(Number(value) || 0);
-}
-
-function ErrorNotice({ error }) {
-  if (!error) return null;
-  return (
-    <section className="staff-notice staff-notice-error" role="alert">
-      <strong>{error.title}</strong>
-      <p>{error.message}</p>
-      {error.status === 503 && (
-        <p>
-          This role remains protected. The backend will enable these records only
-          after its required database workflow and staff assignments are
-          configured.
-        </p>
-      )}
-      {error.status === 403 && (
-        <Link className="text-link" to="/portals">
-          Return to portal directory
-        </Link>
-      )}
-      {error.status === 401 && (
-        <Link className="text-link" to="/login">
-          Sign in to continue
-        </Link>
-      )}
-    </section>
-  );
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function StaffPortalPage() {
   const { portalType } = useParams();
   const [searchParams] = useSearchParams();
-  const portal = portalDetails[portalType];
+  const strategy = getPortalStrategy(portalType);
+
   const previewRole = searchParams.get("previewRole");
   const previewScopeId = Number(searchParams.get("previewScopeId"));
   const hasDeveloperPreview = Boolean(
-    portal &&
-      previewRole === portal.role &&
+    strategy &&
+      previewRole === strategy.roleName &&
       Number.isSafeInteger(previewScopeId) &&
       previewScopeId > 0,
   );
   const previewDisplayName = searchParams.get("previewName");
+
   const [identityState, setIdentityState] = useState("loading");
   const [authorized, setAuthorized] = useState(false);
   const [developerPreview, setDeveloperPreview] = useState(false);
@@ -92,9 +61,21 @@ export default function StaffPortalPage() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState("");
-  const [remarks, setRemarks] = useState({});
-  const [awardAmounts, setAwardAmounts] = useState({});
-  const [allocationForms, setAllocationForms] = useState({});
+
+  // Modals & Active Selections
+  const [reviewModalItem, setReviewModalItem] = useState(null);
+  const [decisionType, setDecisionType] = useState("approved");
+  const [decisionRemarks, setDecisionRemarks] = useState("");
+  const [decisionAwardAmount, setDecisionAwardAmount] = useState("");
+  const [decisionFieldError, setDecisionFieldError] = useState({});
+  const [confirmingDecision, setConfirmingDecision] = useState(false);
+
+  // LGU Allocation Modal
+  const [allocationProgram, setAllocationProgram] = useState(null);
+  const [allocationRows, setAllocationRows] = useState([]);
+
+  // LGU Create Program Modal
+  const [createProgramModalOpen, setCreateProgramModalOpen] = useState(false);
   const [programForm, setProgramForm] = useState({
     programName: "",
     fundingCycleId: "",
@@ -102,74 +83,56 @@ export default function StaffPortalPage() {
     startDate: "",
     endDate: "",
   });
-  const [academicForm, setAcademicForm] = useState({
-    schoolYear: "",
-    semester: "",
+
+  // Registrar Academic Records Modal
+  const [academicDetail, setAcademicDetail] = useState(null);
+  const [academicSubTab, setAcademicSubTab] = useState("view"); // 'view' | 'grade' | 'check'
+  const [gradeForm, setGradeForm] = useState({
+    schoolYear: "2026-2027",
+    semester: "1st Semester",
     gpa: "",
-    gradeRemarks: "",
-    checkType: "",
-    result: "pending",
-    eligibilityRemarks: "",
+    remarks: "",
   });
-  const [selectedDetail, setSelectedDetail] = useState(null);
+  const [eligibilityForm, setEligibilityForm] = useState({
+    checkType: "enrollment_status",
+    result: "eligible",
+    remarks: "",
+  });
 
   const requestPortalData = useCallback(
     (path, options) => {
       if (!hasDeveloperPreview) return apiRequest(path, options);
       const params = new URLSearchParams({
-        previewRole: portal.role,
+        previewRole: strategy.roleName,
         previewScopeId: String(previewScopeId),
       });
       return apiRequest(`${path}?${params.toString()}`, options);
     },
-    [hasDeveloperPreview, portal, previewScopeId],
+    [hasDeveloperPreview, strategy, previewScopeId],
   );
 
   const loadPortalData = useCallback(async () => {
-    if (!portal) return;
+    if (!strategy) return;
     setError(null);
     try {
-      if (portal.base === "admin") {
-        const [dashboard, programs, applications, fundingCycles, queue, lookups] =
-          await Promise.all([
-            requestPortalData("admin/dashboard"),
-            requestPortalData("admin/programs"),
-            requestPortalData("admin/applications"),
-            requestPortalData("admin/funding-cycles"),
-            requestPortalData("admin/verifications"),
-            apiRequest("lookups"),
-          ]);
-        setData({
-          ...dashboard,
-          ...programs,
-          ...applications,
-          ...fundingCycles,
-          ...queue,
-          ...lookups,
-        });
-      } else {
-        const [dashboard, queue] = await Promise.all([
-          requestPortalData(`${portal.base}/dashboard`),
-          requestPortalData(`${portal.base}/verifications`),
-        ]);
-        setData({ ...dashboard, ...queue });
-      }
+      const loaded = await strategy.loadDashboardData(requestPortalData, apiRequest);
+      setData(loaded);
     } catch (requestError) {
       setError({
         status: requestError.status,
         title:
           requestError.status === 503
-            ? "This portal needs the database workflow."
+            ? "Workflow schema or database prerequisites not ready."
             : requestError.status === 403
-              ? "This account cannot access this portal."
+              ? "Access denied. Your account is not authorized for this role scope."
               : requestError.status === 401
-                ? "Your session is not available."
-                : "The portal data could not be loaded.",
-        message: requestError.message || "Try again in a moment.",
+                ? "Your authentication session is expired."
+                : "Failed to load portal records.",
+        message: requestError.message || "Please refresh or sign in again.",
       });
       setData(null);
     }
-  }, [portal, requestPortalData]);
+  }, [strategy, requestPortalData]);
 
   useEffect(() => {
     let active = true;
@@ -178,23 +141,25 @@ export default function StaffPortalPage() {
     setDeveloperPreview(false);
     setData(null);
     setError(null);
-    if (!portal) {
+
+    if (!strategy) {
       setIdentityState("invalid");
       return () => {
         active = false;
       };
     }
+
     apiRequest("auth/me")
       .then(({ user }) => {
         if (!active) return;
         const isDeveloperPreview =
           user.role === "System Admin" && hasDeveloperPreview;
-        if (user.role !== portal.role && !isDeveloperPreview) {
+        if (user.role !== strategy.roleName && !isDeveloperPreview) {
           setIdentityState("forbidden");
           setError({
             status: 403,
-            title: "This staff portal is not available to your account.",
-            message: `This workspace is restricted to the ${portal.role} role.`,
+            title: "Access Restricted",
+            message: `This workspace requires the authorized ${strategy.roleName} role.`,
           });
           return;
         }
@@ -209,17 +174,16 @@ export default function StaffPortalPage() {
           status: requestError.status,
           title:
             requestError.status === 401
-              ? "Sign in to access this staff portal."
-              : requestError.status === 403
-                ? "This account has no active staff assignment."
-                : "Unable to verify your session.",
-          message: requestError.message || "The current session could not be checked.",
+              ? "Authentication required"
+              : "Unable to verify session",
+          message: requestError.message || "Please sign in to proceed.",
         });
       });
+
     return () => {
       active = false;
     };
-  }, [hasDeveloperPreview, portal]);
+  }, [hasDeveloperPreview, strategy]);
 
   useEffect(() => {
     if (identityState === "ready" && authorized) {
@@ -234,14 +198,13 @@ export default function StaffPortalPage() {
     try {
       await action();
       setSuccess(message);
-      setSelectedDetail(null);
       await loadPortalData();
       return true;
     } catch (requestError) {
       setError({
         status: requestError.status,
-        title: "The change could not be saved.",
-        message: requestError.message || "Try again in a moment.",
+        title: "Transaction failed",
+        message: requestError.message || "The requested action could not be saved.",
       });
       return false;
     } finally {
@@ -249,746 +212,1277 @@ export default function StaffPortalPage() {
     }
   }
 
-  async function createProgram(event) {
-    event.preventDefault();
+  // LGU Program Creation
+  async function handleCreateProgram(e) {
+    e.preventDefault();
     const saved = await handleMutation(
       () =>
         apiRequest("admin/programs", {
           method: "POST",
           body: JSON.stringify({
-            programName: programForm.programName,
+            programName: programForm.programName.trim(),
             fundingCycleId: Number(programForm.fundingCycleId),
             totalBudget: Number(programForm.totalBudget),
             startDate: programForm.startDate || null,
             endDate: programForm.endDate || null,
           }),
         }),
-      "Program created.",
+      "Scholarship program created successfully.",
     );
-    if (!saved) return;
-    setProgramForm({
-      programName: "",
-      fundingCycleId: "",
-      totalBudget: "",
-      startDate: "",
-      endDate: "",
-    });
+    if (saved) {
+      setCreateProgramModalOpen(false);
+      setProgramForm({
+        programName: "",
+        fundingCycleId: "",
+        totalBudget: "",
+        startDate: "",
+        endDate: "",
+      });
+    }
   }
 
-  async function changeProgramStatus(program) {
-    const status = program.status === "active" ? "inactive" : "active";
+  // LGU Toggle Program Status
+  async function handleToggleProgramStatus(program) {
+    const nextStatus = program.status === "active" ? "inactive" : "active";
     await handleMutation(
       () =>
         apiRequest(`admin/programs/${program.program_id}`, {
           method: "PATCH",
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status: nextStatus }),
         }),
-      `Program ${status === "active" ? "activated" : "paused"}.`,
+      `Program status changed to ${nextStatus}.`,
     );
   }
 
-  function allocationsFor(program) {
-    return allocationForms[program.program_id] || (
-      program.barangay_allocations || []
-    ).map((allocation) => ({
-      barangayId: String(allocation.barangayId),
-      allocatedAmount: String(allocation.allocatedAmount),
+  // Open Allocation Editor
+  function openAllocationEditor(program) {
+    setAllocationProgram(program);
+    const existing = (program.barangay_allocations || []).map((a) => ({
+      barangayId: String(a.barangayId),
+      allocatedAmount: String(a.allocatedAmount),
     }));
-  }
-
-  function updateAllocation(programId, index, field, value) {
-    const program = data.programs.find(
-      (item) => item.program_id === programId,
+    setAllocationRows(
+      existing.length > 0
+        ? existing
+        : data?.barangays?.slice(0, 3).map((b) => ({
+            barangayId: String(b.barangay_id),
+            allocatedAmount: "0",
+          })) || [],
     );
-    const allocations = [...allocationsFor(program)];
-    allocations[index] = { ...allocations[index], [field]: value };
-    setAllocationForms({ ...allocationForms, [programId]: allocations });
   }
 
-  function addAllocation(program) {
-    const allocations = [...allocationsFor(program)];
-    const usedIds = new Set(allocations.map((allocation) => allocation.barangayId));
-    const firstAvailable = data.barangays.find(
-      (barangay) => !usedIds.has(String(barangay.barangay_id)),
-    );
-    if (!firstAvailable) return;
-    setAllocationForms({
-      ...allocationForms,
-      [program.program_id]: [
-        ...allocations,
-        {
-          barangayId: String(firstAvailable.barangay_id),
-          allocatedAmount: "0",
-        },
-      ],
-    });
-  }
+  async function handleSaveAllocations() {
+    if (!allocationProgram) return;
+    const allocations = allocationRows.map((r) => ({
+      barangayId: Number(r.barangayId),
+      allocatedAmount: Number(r.allocatedAmount),
+    }));
+    const totalAllocated = allocations.reduce((sum, a) => sum + a.allocatedAmount, 0);
+    if (totalAllocated > Number(allocationProgram.total_budget)) {
+      setError({
+        title: "Budget constraint violated",
+        message: `Total allocated amount (₱${totalAllocated.toLocaleString()}) cannot exceed the program budget of ₱${Number(allocationProgram.total_budget).toLocaleString()}.`,
+      });
+      return;
+    }
 
-  function removeAllocation(program, index) {
-    const allocations = [...allocationsFor(program)];
-    allocations.splice(index, 1);
-    setAllocationForms({
-      ...allocationForms,
-      [program.program_id]: allocations,
-    });
-  }
-
-  async function saveAllocations(program) {
     const saved = await handleMutation(
       () =>
-        apiRequest(
-          `admin/programs/${program.program_id}/barangay-allocations`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              allocations: allocationsFor(program).map((allocation) => ({
-                barangayId: Number(allocation.barangayId),
-                allocatedAmount: Number(allocation.allocatedAmount),
-              })),
-            }),
-          },
-        ),
-      "Barangay allocations saved.",
+        apiRequest(`admin/programs/${allocationProgram.program_id}/barangay-allocations`, {
+          method: "PUT",
+          body: JSON.stringify({ allocations }),
+        }),
+      "Barangay allocations updated successfully.",
     );
     if (saved) {
-      const next = { ...allocationForms };
-      delete next[program.program_id];
-      setAllocationForms(next);
+      setAllocationProgram(null);
     }
   }
 
-  async function decideVerification(verification, status) {
-    const body = {
-      status,
-      remarks: remarks[verification.verification_id] || null,
-    };
-    if (portal.base === "admin" && status === "approved") {
-      body.awardAmount = Number(awardAmounts[verification.verification_id]);
+  // Verification Decision Handling
+  function openReviewModal(item) {
+    setReviewModalItem(item);
+    setDecisionType("approved");
+    setDecisionRemarks("");
+    setDecisionAwardAmount("");
+    setDecisionFieldError({});
+  }
+
+  async function handleExecuteDecision() {
+    if (!reviewModalItem) return;
+    const vStrategy = strategy.getVerificationStrategy();
+    const errors = vStrategy.validateDecision(decisionType, decisionRemarks, {
+      awardAmount: decisionAwardAmount,
+    });
+    if (Object.keys(errors).length > 0) {
+      setDecisionFieldError(errors);
+      return;
     }
-    await handleMutation(
+
+    const saved = await handleMutation(
       () =>
-        apiRequest(
-          `${portal.base}/verifications/${verification.verification_id}`,
-          { method: "PATCH", body: JSON.stringify(body) },
-        ),
-      status === "needs_information"
-        ? "More information requested."
-        : status === "rejected"
-          ? "Application rejected."
-          : portal.base === "admin"
-            ? "Application approved and award reserved."
-            : "Verification recorded.",
+        vStrategy.submitDecision(apiRequest, reviewModalItem.verification_id, {
+          status: decisionType,
+          remarks: decisionRemarks.trim() || null,
+          awardAmount: decisionAwardAmount ? Number(decisionAwardAmount) : undefined,
+        }),
+      decisionType === "approved"
+        ? strategy.base === "admin"
+          ? "Application approved and award reserved successfully."
+          : "Verification endorsed successfully."
+        : decisionType === "needs_information"
+          ? "Requested additional information from the applicant."
+          : "Application verification marked as rejected.",
     );
+
+    if (saved) {
+      setReviewModalItem(null);
+      setConfirmingDecision(false);
+    }
   }
 
-  async function showRegistrarDetails(verificationId) {
+  // Registrar Academic Records Details
+  async function openRegistrarDetails(item) {
     setBusy(true);
-    setError(null);
     try {
-      const result = await apiRequest(
-        `registrar/verifications/${verificationId}${
+      const res = await apiRequest(
+        `registrar/verifications/${item.verification_id}${
           hasDeveloperPreview
-            ? `?previewRole=${encodeURIComponent(portal.role)}&previewScopeId=${previewScopeId}`
+            ? `?previewRole=${encodeURIComponent(strategy.roleName)}&previewScopeId=${previewScopeId}`
             : ""
         }`,
       );
-      setSelectedDetail(result);
-    } catch (requestError) {
+      setAcademicDetail({ ...res, queueItem: item });
+      setAcademicSubTab("view");
+    } catch (err) {
       setError({
-        status: requestError.status,
-        title: "Verification details could not be loaded.",
-        message: requestError.message || "Try again in a moment.",
+        title: "Could not load academic records",
+        message: err.message,
       });
     } finally {
       setBusy(false);
     }
   }
 
-  async function saveAcademicRecord(verification, kind) {
-    const gradeReport = kind === "grade-report";
-    const body = gradeReport
-      ? {
-          schoolYear: academicForm.schoolYear,
-          semester: academicForm.semester,
-          gpa: Number(academicForm.gpa),
-          remarks: academicForm.gradeRemarks || null,
-        }
-      : {
-          checkType: academicForm.checkType,
-          result: academicForm.result,
-          remarks: academicForm.eligibilityRemarks || null,
-        };
-    const route = gradeReport ? "grade-reports" : "eligibility-checks";
-    await handleMutation(
+  async function handleAddGradeReport(e) {
+    e.preventDefault();
+    if (!academicDetail?.queueItem) return;
+    const regStrategy = strategy.getVerificationStrategy();
+    const saved = await handleMutation(
       () =>
-        apiRequest(
-          `registrar/applications/${verification.application_id}/${route}`,
-          { method: "POST", body: JSON.stringify(body) },
+        regStrategy.submitGradeReport(
+          apiRequest,
+          academicDetail.queueItem.application_id,
+          {
+            schoolYear: gradeForm.schoolYear,
+            semester: gradeForm.semester,
+            gpa: Number(gradeForm.gpa),
+            remarks: gradeForm.remarks || null,
+          },
         ),
-      gradeReport ? "Grade report recorded." : "Eligibility check recorded.",
+      "Academic grade report recorded.",
     );
+    if (saved) {
+      openRegistrarDetails(academicDetail.queueItem);
+    }
   }
 
-  if (!portal || identityState === "invalid") {
+  async function handleAddEligibilityCheck(e) {
+    e.preventDefault();
+    if (!academicDetail?.queueItem) return;
+    const regStrategy = strategy.getVerificationStrategy();
+    const saved = await handleMutation(
+      () =>
+        regStrategy.submitEligibilityCheck(
+          apiRequest,
+          academicDetail.queueItem.application_id,
+          {
+            checkType: eligibilityForm.checkType,
+            result: eligibilityForm.result,
+            remarks: eligibilityForm.remarks || null,
+          },
+        ),
+      "Eligibility check recorded.",
+    );
+    if (saved) {
+      openRegistrarDetails(academicDetail.queueItem);
+    }
+  }
+
+  if (!strategy || identityState === "invalid") {
     return (
-      <section className="page-container information-page">
+      <div className="page-container information-page">
         <PageHeading
-          eyebrow="STAFF PORTAL"
-          title="This portal is not available."
-          description="Choose one of the GrantWise role portals."
+          eyebrow="GRANTWISE WORKSPACE"
+          title="Invalid Portal Route"
+          description="The requested staff workspace does not exist in the GrantWise engine."
         />
-        <Link className="text-link" to="/portals">
-          <ArrowLeft size={16} aria-hidden="true" />
-          All portals
+        <Link className="button button-outline" to="/portals">
+          <ArrowLeft size={16} /> Return to Portal Directory
         </Link>
-      </section>
+      </div>
     );
   }
 
   return (
-    <div className="page-container information-page staff-dashboard">
-      <PageHeading
-        eyebrow={portal.eyebrow}
-        title={portal.title}
-        description={portal.description}
-      />
-      <div className="staff-toolbar">
-        <span>
-          {developerPreview
-            ? `Developer preview · read-only · ${previewDisplayName || portal.role}`
-            : "Access is checked against your active server-side assignment."}
-        </span>
-        {authorized && (
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={loadPortalData}
-            disabled={busy}
-          >
-            <RefreshCw size={15} aria-hidden="true" />
-            Refresh
-          </button>
-        )}
+    <div className="staff-portal-workspace">
+      {/* Page Header */}
+      <div className="workspace-header">
+        <div>
+          <PageHeading
+            eyebrow={strategy.eyebrow}
+            title={strategy.title}
+            description={strategy.description}
+          />
+          <div className="workspace-scope-pill">
+            <span className="scope-indicator" />
+            <span>
+              {developerPreview
+                ? `Developer Preview Mode (${previewDisplayName || `Scope #${previewScopeId}`})`
+                : "Active Server-Verified Assignment"}
+            </span>
+          </div>
+        </div>
+
+        <div className="workspace-actions">
+          {authorized && (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={loadPortalData}
+              disabled={busy}
+              title="Refresh queue and budget records"
+            >
+              <RefreshCw size={15} className={busy ? "spin" : ""} aria-hidden="true" />
+              <span>Refresh</span>
+            </button>
+          )}
+          {strategy.base === "admin" && !developerPreview && (
+            <button
+              type="button"
+              className="button button-primary"
+              onClick={() => setCreateProgramModalOpen(true)}
+            >
+              <Plus size={16} aria-hidden="true" />
+              <span>Create Program</span>
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Developer Preview Alert */}
       {developerPreview && (
-        <section className="staff-notice" role="note">
-          <strong>Read-only developer preview</strong>
-          <p>
-            You are viewing the {portal.role} dashboard for{" "}
-            {previewDisplayName || `scope #${previewScopeId}`}. Changes and
-            student portal access are disabled in this preview.
-          </p>
-        </section>
+        <div className="staff-notice auth-banner-success" role="note">
+          <ShieldCheck size={18} aria-hidden="true" />
+          <div>
+            <strong>Read-Only Developer Preview Active</strong>
+            <p>
+              Simulating authorized access for {strategy.roleName} ({previewDisplayName || `Scope #${previewScopeId}`}). Mutations are restricted.
+            </p>
+          </div>
+        </div>
       )}
 
-      {identityState === "loading" && (
-        <p role="status" className="staff-loading">Checking your staff session...</p>
-      )}
-      <ErrorNotice error={error} />
-      {success && <p className="staff-notice staff-notice-success" role="status">{success}</p>}
-      {identityState === "ready" && !data && !error && (
-        <p role="status" className="staff-loading">Loading authorized records...</p>
+      {/* Notices & Alerts */}
+      {error && (
+        <div className="staff-notice staff-notice-error" role="alert">
+          <AlertCircle size={18} aria-hidden="true" />
+          <div>
+            <strong>{error.title}</strong>
+            <p>{error.message}</p>
+          </div>
+        </div>
       )}
 
-      {data && portal.base === "admin" && (
-        <>
-          <section className="staff-summary-grid" aria-label="Funding unit summary">
-            {[
-              ["Programs", data.summary.program_count],
-              ["Applications", data.summary.application_count],
-              ["In review", data.summary.in_review_count],
-              ["Total budget", formatMoney(data.summary.total_budget)],
-              ["Remaining", formatMoney(data.summary.remaining_budget)],
-              ["Reserved", formatMoney(data.summary.reserved_budget)],
-              ["Released", formatMoney(data.summary.released_budget)],
-            ].map(([label, value]) => (
-              <article className="staff-summary-card" key={label}>
-                <span>{label}</span>
-                <strong>{value}</strong>
-              </article>
-            ))}
-          </section>
+      {success && (
+        <div className="staff-notice staff-notice-success" role="status">
+          <CheckCircle2 size={18} aria-hidden="true" />
+          <p>{success}</p>
+        </div>
+      )}
 
-          <section className="staff-panel">
-            <h2>Programs in your funding unit</h2>
-            {data.programs.length === 0 ? (
-              <p className="staff-empty">No programs are recorded for this funding unit.</p>
-            ) : (
-              <div className="staff-record-list">
-                {data.programs.map((program) => (
-                  <article className="staff-record" key={program.program_id}>
-                    <div>
-                      <strong>{program.program_name}</strong>
-                      <p>{program.cycle_code} · {displayStatus(program.status)}</p>
-                      <p>
-                        Total {formatMoney(program.total_budget)} · Remaining{" "}
-                        {formatMoney(program.remaining_budget)} · Reserved{" "}
-                        {formatMoney(program.reserved_budget)} · Released{" "}
-                        {formatMoney(program.released_budget)}
-                      </p>
-                      <div className="staff-allocation-editor" hidden={developerPreview}>
-                        <strong>Barangay allocations</strong>
-                        {allocationsFor(program).map((allocation, index) => (
-                          <div
-                            className="staff-allocation-row"
-                            key={`${program.program_id}-${index}`}
-                          >
-                            <select
-                              aria-label="Allocation barangay"
-                              value={allocation.barangayId}
-                              onChange={(event) => updateAllocation(
-                                program.program_id,
-                                index,
-                                "barangayId",
-                                event.target.value,
-                              )}
-                            >
-                              <option value="">Select barangay</option>
-                              {data.barangays.map((barangay) => (
-                                <option
-                                  key={barangay.barangay_id}
-                                  value={barangay.barangay_id}
-                                  disabled={allocationsFor(program).some(
-                                    (row, rowIndex) =>
-                                      rowIndex !== index &&
-                                      row.barangayId === String(barangay.barangay_id),
-                                  )}
-                                >
-                                  {barangay.barangay_name}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              aria-label="Barangay allocation amount in PHP"
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={allocation.allocatedAmount}
-                              onChange={(event) => updateAllocation(
-                                program.program_id,
-                                index,
-                                "allocatedAmount",
-                                event.target.value,
-                              )}
-                            />
-                            <button
-                              className="button button-secondary"
-                              type="button"
-                              onClick={() => removeAllocation(program, index)}
-                              disabled={busy}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                        <div className="staff-actions">
+      {/* Loading state */}
+      {identityState === "loading" && <LoadingSkeleton type="stats" />}
+
+      {/* Data display */}
+      {data && (
+        <div className="workspace-body">
+          {/* A. LGU PROGRAM ADMIN VIEW */}
+          {strategy.base === "admin" && (
+            <>
+              {/* Stat Cards */}
+              <div className="stats-grid-4">
+                <StatCard
+                  title="Active Programs"
+                  value={data.summary?.program_count || 0}
+                  subtext="In your funding unit"
+                  icon={Landmark}
+                />
+                <StatCard
+                  title="Total Applications"
+                  value={data.summary?.application_count || 0}
+                  subtext="Submitted across all programs"
+                  icon={FileText}
+                />
+                <StatCard
+                  title="In Review Queue"
+                  value={data.summary?.in_review_count || 0}
+                  subtext="Awaiting LGU review / award approval"
+                  icon={Clock}
+                  variant="warning"
+                />
+                <StatCard
+                  title="Available Budget"
+                  value={formatPhp(Number(data.summary?.remaining_budget || 0) - Number(data.summary?.reserved_budget || 0))}
+                  subtext={`Total: ${formatPhp(data.summary?.total_budget || 0)}`}
+                  icon={Building2}
+                  variant="success"
+                />
+              </div>
+
+              {/* Funding Summary Visualizer */}
+              <FundingSummary
+                totalBudget={data.summary?.total_budget}
+                remainingBudget={data.summary?.remaining_budget}
+                reservedBudget={data.summary?.reserved_budget}
+                releasedBudget={data.summary?.released_budget}
+                programName={data.programs?.[0]?.program_name || "Funding Unit Portfolio"}
+                fundingCycle={data.fundingCycles?.[0]?.cycle_code}
+              />
+
+              {/* Program Management Table */}
+              <section className="staff-panel" id="programs">
+                <div className="panel-title-bar">
+                  <div>
+                    <h2>Scholarship Programs & Barangay Allocations</h2>
+                    <p className="text-muted text-xs">
+                      Authorized funding programs and quota allocations for Tagbilaran barangays.
+                    </p>
+                  </div>
+                </div>
+
+                <DataTable
+                  keyField="program_id"
+                  data={data.programs || []}
+                  searchFields={["program_name", "cycle_code"]}
+                  searchPlaceholder="Search programs..."
+                  columns={[
+                    {
+                      header: "Program Name",
+                      accessor: "program_name",
+                      sortable: true,
+                      cell: (row) => (
+                        <div>
+                          <strong>{row.program_name}</strong>
+                          <div className="text-muted text-xs">Cycle: {row.cycle_code}</div>
+                        </div>
+                      ),
+                    },
+                    {
+                      header: "Total Budget",
+                      accessor: "total_budget",
+                      sortable: true,
+                      cell: (row) => formatPhp(row.total_budget),
+                    },
+                    {
+                      header: "Reserved (Awards)",
+                      accessor: "reserved_budget",
+                      sortable: true,
+                      cell: (row) => formatPhp(row.reserved_budget),
+                    },
+                    {
+                      header: "Released",
+                      accessor: "released_budget",
+                      sortable: true,
+                      cell: (row) => formatPhp(row.released_budget),
+                    },
+                    {
+                      header: "Status",
+                      accessor: "status",
+                      cell: (row) => (
+                        <StatusBadge
+                          status={row.status === "active" ? "approved" : "neutral"}
+                          customLabel={displayStatus(row.status)}
+                        />
+                      ),
+                    },
+                    {
+                      header: "Actions",
+                      accessor: "actions",
+                      cell: (row) => (
+                        <div className="flex gap-2">
                           <button
-                            className="button button-secondary"
                             type="button"
-                            onClick={() => addAllocation(program)}
-                            disabled={
-                              busy ||
-                              allocationsFor(program).length >= data.barangays.length
-                            }
+                            className="button button-secondary button-sm"
+                            onClick={() => openAllocationEditor(row)}
+                            disabled={developerPreview}
+                            title="Manage barangay quota and allocations"
                           >
-                            Add barangay
+                            Allocations ({row.barangay_allocations?.length || 0})
                           </button>
                           <button
-                            className="button button-primary"
                             type="button"
-                            onClick={() => saveAllocations(program)}
-                            disabled={busy || allocationsFor(program).length === 0}
+                            className="button button-outline button-sm"
+                            onClick={() => handleToggleProgramStatus(row)}
+                            disabled={developerPreview || row.status === "closed" || busy}
                           >
-                            Save allocations
+                            {row.status === "active" ? "Pause" : "Activate"}
                           </button>
                         </div>
-                      </div>
-                    </div>
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      onClick={() => changeProgramStatus(program)}
-                      disabled={busy || program.status === "closed"}
-                      hidden={developerPreview}
-                    >
-                      {program.status === "active" ? "Pause" : "Activate"}
-                    </button>
-                  </article>
+                      ),
+                    },
+                  ]}
+                />
+              </section>
+
+              {/* LGU Application Review Queue */}
+              <section className="staff-panel" id="verifications">
+                <div className="panel-title-bar">
+                  <div>
+                    <h2>LGU Final Review Queue</h2>
+                    <p className="text-muted text-xs">
+                      Endorsed applications requiring final municipal review, duplicate grant verification, and award reservation.
+                    </p>
+                  </div>
+                </div>
+
+                <DataTable
+                  keyField="verification_id"
+                  data={data.verifications || []}
+                  searchFields={["first_name", "last_name", "student_number", "program_name", "school_name", "barangay_name"]}
+                  searchPlaceholder="Search review queue..."
+                  emptyTitle="No applications pending LGU review"
+                  emptyDescription="All endorsed applications have been processed for your funding unit."
+                  columns={[
+                    {
+                      header: "Applicant",
+                      accessor: "last_name",
+                      sortable: true,
+                      cell: (row) => (
+                        <div>
+                          <strong>{row.first_name} {row.last_name}</strong>
+                          <div className="text-muted text-xs">{row.student_number}</div>
+                        </div>
+                      ),
+                    },
+                    {
+                      header: "Program",
+                      accessor: "program_name",
+                      sortable: true,
+                    },
+                    {
+                      header: "School & Barangay",
+                      accessor: "school_name",
+                      cell: (row) => (
+                        <div>
+                          <span>{row.school_name}</span>
+                          <div className="text-muted text-xs">Brgy. {row.barangay_name}</div>
+                        </div>
+                      ),
+                    },
+                    {
+                      header: "Course & Standing",
+                      accessor: "course",
+                      cell: (row) => (
+                        <span className="text-xs">
+                          {row.course || "—"} {row.year_level ? `(${row.year_level})` : ""}
+                        </span>
+                      ),
+                    },
+                    {
+                      header: "Stage Status",
+                      accessor: "status",
+                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                    },
+                    {
+                      header: "Actions",
+                      accessor: "actions",
+                      cell: (row) => (
+                        <button
+                          type="button"
+                          className="button button-primary button-sm"
+                          onClick={() => openReviewModal(row)}
+                          disabled={developerPreview}
+                        >
+                          Review & Decide
+                        </button>
+                      ),
+                    },
+                  ]}
+                />
+              </section>
+
+              {/* All Applications Directory */}
+              <section className="staff-panel" id="applications">
+                <h2>All Applications Portfolio</h2>
+                <DataTable
+                  keyField="application_id"
+                  data={data.applications || []}
+                  searchFields={["first_name", "last_name", "student_number", "program_name", "school_name", "barangay_name"]}
+                  searchPlaceholder="Search all unit applications..."
+                  columns={[
+                    {
+                      header: "Applicant",
+                      accessor: "last_name",
+                      sortable: true,
+                      cell: (row) => `${row.first_name} ${row.last_name} (${row.student_number})`,
+                    },
+                    { header: "Program", accessor: "program_name", sortable: true },
+                    { header: "School", accessor: "school_name" },
+                    { header: "Barangay", accessor: "barangay_name" },
+                    {
+                      header: "Application Status",
+                      accessor: "application_status",
+                      cell: (row) => <StatusBadge status={row.application_status} />,
+                    },
+                  ]}
+                />
+              </section>
+            </>
+          )}
+
+          {/* B. BARANGAY COORDINATOR VIEW */}
+          {strategy.base === "coordinator" && (
+            <>
+              <div className="stats-grid-4">
+                <StatCard
+                  title="Pending Residency Verifications"
+                  value={data.summary?.pending_count || 0}
+                  subtext="Waiting for your barangay verification"
+                  icon={Clock}
+                  variant="warning"
+                />
+                <StatCard
+                  title="Needs More Information"
+                  value={data.summary?.needs_information_count || 0}
+                  subtext="Applicants awaiting document submission"
+                  icon={AlertCircle}
+                />
+                <StatCard
+                  title="Assigned Barangay"
+                  value={data.verifications?.[0]?.barangay_name || "Tagbilaran"}
+                  subtext="Authorized residency territory"
+                  icon={Building2}
+                  variant="success"
+                />
+              </div>
+
+              <section className="staff-panel" id="verifications">
+                <div className="panel-title-bar">
+                  <div>
+                    <h2>Barangay Residency Verification Queue</h2>
+                    <p className="text-muted text-xs">
+                      Verify genuine residency, voter registration, or certificate of indigency for applicants residing in your barangay.
+                    </p>
+                  </div>
+                </div>
+
+                <DataTable
+                  keyField="verification_id"
+                  data={data.verifications || []}
+                  searchFields={["first_name", "last_name", "student_number", "school_name", "program_name"]}
+                  searchPlaceholder="Search residency queue..."
+                  emptyTitle="No pending barangay verifications"
+                  emptyDescription="Your barangay verification queue is completely clear."
+                  columns={[
+                    {
+                      header: "Applicant Name",
+                      accessor: "last_name",
+                      sortable: true,
+                      cell: (row) => (
+                        <div>
+                          <strong>{row.first_name} {row.last_name}</strong>
+                          <div className="text-muted text-xs">ID: {row.student_number}</div>
+                        </div>
+                      ),
+                    },
+                    { header: "Program", accessor: "program_name", sortable: true },
+                    { header: "School", accessor: "school_name" },
+                    {
+                      header: "Residency",
+                      accessor: "barangay_name",
+                      cell: (row) => <span>Brgy. {row.barangay_name}</span>,
+                    },
+                    {
+                      header: "Status",
+                      accessor: "status",
+                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                    },
+                    {
+                      header: "Actions",
+                      accessor: "actions",
+                      cell: (row) => (
+                        <button
+                          type="button"
+                          className="button button-primary button-sm"
+                          onClick={() => openReviewModal(row)}
+                          disabled={developerPreview}
+                        >
+                          Verify Residency
+                        </button>
+                      ),
+                    },
+                  ]}
+                />
+              </section>
+            </>
+          )}
+
+          {/* C. SCHOOL REGISTRAR VIEW */}
+          {strategy.base === "registrar" && (
+            <>
+              <div className="stats-grid-4">
+                <StatCard
+                  title="Pending Academic Verifications"
+                  value={data.summary?.pending_count || 0}
+                  subtext="Waiting for school enrollment verification"
+                  icon={Clock}
+                  variant="warning"
+                />
+                <StatCard
+                  title="Needs Academic Information"
+                  value={data.summary?.needs_information_count || 0}
+                  subtext="Pending grade or enrollment clarification"
+                  icon={AlertCircle}
+                />
+                <StatCard
+                  title="Assigned Institution"
+                  value={data.verifications?.[0]?.school_name || "Campus"}
+                  subtext="Authorized registrar scope"
+                  icon={School}
+                  variant="success"
+                />
+              </div>
+
+              <section className="staff-panel" id="verifications">
+                <div className="panel-title-bar">
+                  <div>
+                    <h2>Academic & Enrollment Verification Queue</h2>
+                    <p className="text-muted text-xs">
+                      Verify student registration, academic standing, and submit official grade reports or eligibility records.
+                    </p>
+                  </div>
+                </div>
+
+                <DataTable
+                  keyField="verification_id"
+                  data={data.verifications || []}
+                  searchFields={["first_name", "last_name", "student_number", "course", "program_name"]}
+                  searchPlaceholder="Search academic queue..."
+                  emptyTitle="No academic verifications pending"
+                  emptyDescription="All student applications for your school have been verified."
+                  columns={[
+                    {
+                      header: "Student",
+                      accessor: "last_name",
+                      sortable: true,
+                      cell: (row) => (
+                        <div>
+                          <strong>{row.first_name} {row.last_name}</strong>
+                          <div className="text-muted text-xs">{row.student_number}</div>
+                        </div>
+                      ),
+                    },
+                    { header: "Program", accessor: "program_name" },
+                    {
+                      header: "Curriculum",
+                      accessor: "course",
+                      cell: (row) => `${row.course || "—"} (${row.year_level || "1st Year"})`,
+                    },
+                    {
+                      header: "Verification Status",
+                      accessor: "status",
+                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                    },
+                    {
+                      header: "Actions",
+                      accessor: "actions",
+                      cell: (row) => (
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            className="button button-secondary button-sm"
+                            onClick={() => openRegistrarDetails(row)}
+                            disabled={busy}
+                          >
+                            Academic Records
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-primary button-sm"
+                            onClick={() => openReviewModal(row)}
+                            disabled={developerPreview}
+                          >
+                            Endorse
+                          </button>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </section>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* =====================================================================
+         MODAL: LGU CREATE PROGRAM
+         ===================================================================== */}
+      <ModalDialog
+        isOpen={createProgramModalOpen}
+        onClose={() => setCreateProgramModalOpen(false)}
+        title="Create Scholarship Program"
+        subtitle="Establish a new scholarship fund under your assigned funding unit."
+      >
+        <form onSubmit={handleCreateProgram} className="staff-modal-form">
+          <div className="form-field">
+            <label className="form-label">Program Name</label>
+            <input
+              required
+              maxLength={200}
+              placeholder="e.g., Tagbilaran Tertiary Educational Assistance 2026"
+              value={programForm.programName}
+              onChange={(e) => setProgramForm({ ...programForm, programName: e.target.value })}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="form-field">
+              <label className="form-label">Funding Cycle</label>
+              <select
+                required
+                value={programForm.fundingCycleId}
+                onChange={(e) => setProgramForm({ ...programForm, fundingCycleId: e.target.value })}
+              >
+                <option value="">Select funding cycle</option>
+                {(data?.fundingCycles || []).map((c) => (
+                  <option key={c.funding_cycle_id} value={c.funding_cycle_id}>
+                    {c.cycle_code}
+                  </option>
                 ))}
+              </select>
+            </div>
+
+            <div className="form-field">
+              <label className="form-label">Authorized Budget (PHP)</label>
+              <input
+                required
+                type="number"
+                min="0.01"
+                step="0.01"
+                placeholder="500000.00"
+                value={programForm.totalBudget}
+                onChange={(e) => setProgramForm({ ...programForm, totalBudget: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="form-field">
+              <label className="form-label">Application Start Date</label>
+              <input
+                type="date"
+                value={programForm.startDate}
+                onChange={(e) => setProgramForm({ ...programForm, startDate: e.target.value })}
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label">Application End Date</label>
+              <input
+                type="date"
+                value={programForm.endDate}
+                onChange={(e) => setProgramForm({ ...programForm, endDate: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => setCreateProgramModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="button button-primary" disabled={busy}>
+              {busy ? "Creating Program..." : "Create Program"}
+            </button>
+          </div>
+        </form>
+      </ModalDialog>
+
+      {/* =====================================================================
+         MODAL: LGU BARANGAY ALLOCATIONS EDITOR
+         ===================================================================== */}
+      {allocationProgram && (
+        <ModalDialog
+          isOpen={Boolean(allocationProgram)}
+          onClose={() => setAllocationProgram(null)}
+          title={`Barangay Allocations: ${allocationProgram.program_name}`}
+          subtitle={`Program Total Budget: ${formatPhp(allocationProgram.total_budget)}`}
+          maxWidth="max-w-3xl"
+        >
+          <div className="allocation-editor-wrapper">
+            <p className="text-sm text-muted mb-4">
+              Allocate authorized scholarship grant funds per Tagbilaran barangay. Allocations cannot exceed total program budget.
+            </p>
+
+            <div className="allocations-table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Barangay</th>
+                    <th>Allocated Amount (PHP)</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocationRows.map((row, index) => (
+                    <tr key={index}>
+                      <td>
+                        <select
+                          value={row.barangayId}
+                          onChange={(e) => {
+                            const updated = [...allocationRows];
+                            updated[index].barangayId = e.target.value;
+                            setAllocationRows(updated);
+                          }}
+                        >
+                          {(data?.barangays || []).map((b) => (
+                            <option
+                              key={b.barangay_id}
+                              value={b.barangay_id}
+                              disabled={allocationRows.some(
+                                (r, i) => i !== index && String(r.barangayId) === String(b.barangay_id),
+                              )}
+                            >
+                              {b.barangay_name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.allocatedAmount}
+                          onChange={(e) => {
+                            const updated = [...allocationRows];
+                            updated[index].allocatedAmount = e.target.value;
+                            setAllocationRows(updated);
+                          }}
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="button button-outline button-sm text-red-600"
+                          onClick={() => {
+                            const updated = allocationRows.filter((_, i) => i !== index);
+                            setAllocationRows(updated);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-between items-center mt-4 pt-3 border-t border-[var(--border-color)]">
+              <button
+                type="button"
+                className="button button-secondary button-sm"
+                onClick={() => {
+                  const used = new Set(allocationRows.map((r) => r.barangayId));
+                  const nextAvail = (data?.barangays || []).find((b) => !used.has(String(b.barangay_id)));
+                  if (nextAvail) {
+                    setAllocationRows([...allocationRows, { barangayId: String(nextAvail.barangay_id), allocatedAmount: "0" }]);
+                  }
+                }}
+                disabled={allocationRows.length >= (data?.barangays?.length || 0)}
+              >
+                + Add Barangay Allocation
+              </button>
+
+              <div className="text-right">
+                <span className="text-xs text-muted block">Total Allocated Sum:</span>
+                <strong className="text-base text-[var(--main-text)]">
+                  {formatPhp(allocationRows.reduce((sum, r) => sum + (Number(r.allocatedAmount) || 0), 0))}
+                </strong>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-outline"
+                onClick={() => setAllocationProgram(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={handleSaveAllocations}
+                disabled={busy}
+              >
+                {busy ? "Saving Allocations..." : "Save Allocations"}
+              </button>
+            </div>
+          </div>
+        </ModalDialog>
+      )}
+
+      {/* =====================================================================
+         MODAL: VERIFICATION & AWARD DECISION
+         ===================================================================== */}
+      {reviewModalItem && (
+        <ModalDialog
+          isOpen={Boolean(reviewModalItem)}
+          onClose={() => setReviewModalItem(null)}
+          title={`Review Application: ${reviewModalItem.first_name} ${reviewModalItem.last_name}`}
+          subtitle={`${reviewModalItem.program_name} · ${reviewModalItem.school_name}`}
+        >
+          <div className="review-modal-body">
+            {/* Applicant Summary Card */}
+            <div className="applicant-details-card mb-4 p-4 rounded-lg bg-[var(--hover-bg)] border border-[var(--border-color)]">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-muted block text-xs">Student ID:</span>
+                  <strong>{reviewModalItem.student_number}</strong>
+                </div>
+                <div>
+                  <span className="text-muted block text-xs">Barangay Residency:</span>
+                  <strong>Brgy. {reviewModalItem.barangay_name}</strong>
+                </div>
+                <div>
+                  <span className="text-muted block text-xs">School:</span>
+                  <span>{reviewModalItem.school_name}</span>
+                </div>
+                <div>
+                  <span className="text-muted block text-xs">Curriculum:</span>
+                  <span>{reviewModalItem.course || "—"} ({reviewModalItem.year_level || "1st Year"})</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Decision Radio Group */}
+            <div className="form-field">
+              <label className="form-label">Verification Decision</label>
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  className={`p-3 rounded-lg border text-sm font-semibold transition text-center ${
+                    decisionType === "approved"
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200"
+                      : "border-[var(--border-color)] bg-[var(--card-bg)] text-[var(--secondary-text)]"
+                  }`}
+                  onClick={() => setDecisionType("approved")}
+                >
+                  <CheckCircle2 size={16} className="mx-auto mb-1 text-emerald-600" />
+                  {strategy.base === "admin" ? "Approve & Award" : "Endorse"}
+                </button>
+
+                <button
+                  type="button"
+                  className={`p-3 rounded-lg border text-sm font-semibold transition text-center ${
+                    decisionType === "needs_information"
+                      ? "border-amber-500 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200"
+                      : "border-[var(--border-color)] bg-[var(--card-bg)] text-[var(--secondary-text)]"
+                  }`}
+                  onClick={() => setDecisionType("needs_information")}
+                >
+                  <Clock size={16} className="mx-auto mb-1 text-amber-600" />
+                  Need Info
+                </button>
+
+                <button
+                  type="button"
+                  className={`p-3 rounded-lg border text-sm font-semibold transition text-center ${
+                    decisionType === "rejected"
+                      ? "border-red-500 bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200"
+                      : "border-[var(--border-color)] bg-[var(--card-bg)] text-[var(--secondary-text)]"
+                  }`}
+                  onClick={() => setDecisionType("rejected")}
+                >
+                  <XCircle size={16} className="mx-auto mb-1 text-red-600" />
+                  Reject
+                </button>
+              </div>
+            </div>
+
+            {/* If LGU Admin and Approved: Award Amount input */}
+            {strategy.base === "admin" && decisionType === "approved" && (
+              <div className="form-field">
+                <label className="form-label">Scholarship Award Amount (PHP)</label>
+                <div className="input-with-icon">
+                  <span className="input-leading-icon font-bold">₱</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    className={`form-input has-leading-icon ${decisionFieldError.awardAmount ? "form-input-error" : ""}`}
+                    placeholder="e.g. 5000.00"
+                    value={decisionAwardAmount}
+                    onChange={(e) => setDecisionAwardAmount(e.target.value)}
+                  />
+                </div>
+                {decisionFieldError.awardAmount && (
+                  <span className="form-error-msg">{decisionFieldError.awardAmount}</span>
+                )}
+                <span className="text-xs text-muted">
+                  Approving immediately reserves this amount from the program's available budget.
+                </span>
               </div>
             )}
-          </section>
 
-          {!developerPreview && <section className="staff-panel">
-            <h2>Create a program</h2>
-            {data.fundingCycles.length === 0 ? (
-              <p className="staff-empty">
-                No active funding cycle is configured. Contact the database
-                administrator before creating a program.
-              </p>
-            ) : (
-              <form className="staff-form" onSubmit={createProgram}>
-                <label>
-                  Program name
-                  <input
-                    required
-                    maxLength={200}
-                    value={programForm.programName}
-                    onChange={(event) => setProgramForm({
-                      ...programForm,
-                      programName: event.target.value,
-                    })}
-                  />
-                </label>
-                <label>
-                  Funding cycle
-                  <select
-                    required
-                    value={programForm.fundingCycleId}
-                    onChange={(event) => setProgramForm({
-                      ...programForm,
-                      fundingCycleId: event.target.value,
-                    })}
-                  >
-                    <option value="">Select a cycle</option>
-                    {data.fundingCycles.map((cycle) => (
-                      <option key={cycle.funding_cycle_id} value={cycle.funding_cycle_id}>
-                        {cycle.cycle_code}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Total budget (PHP)
+            {/* Remarks input */}
+            <div className="form-field">
+              <label className="form-label">
+                Reviewer Remarks {decisionType !== "approved" && <span className="text-red-500">*</span>}
+              </label>
+              <textarea
+                rows={3}
+                placeholder="Enter notes, requirements, or reasons for this decision..."
+                value={decisionRemarks}
+                onChange={(e) => setDecisionRemarks(e.target.value)}
+                className={decisionFieldError.remarks ? "form-input-error" : ""}
+              />
+              {decisionFieldError.remarks && (
+                <span className="form-error-msg">{decisionFieldError.remarks}</span>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-outline"
+                onClick={() => setReviewModalItem(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`button ${
+                  decisionType === "rejected"
+                    ? "button-danger"
+                    : "button-primary"
+                }`}
+                onClick={handleExecuteDecision}
+                disabled={busy}
+              >
+                {busy ? "Saving Decision..." : "Submit Decision"}
+              </button>
+            </div>
+          </div>
+        </ModalDialog>
+      )}
+
+      {/* =====================================================================
+         MODAL: REGISTRAR ACADEMIC RECORDS & ELIGIBILITY
+         ===================================================================== */}
+      {academicDetail && (
+        <ModalDialog
+          isOpen={Boolean(academicDetail)}
+          onClose={() => setAcademicDetail(null)}
+          title={`Academic Records: ${academicDetail.queueItem.first_name} ${academicDetail.queueItem.last_name}`}
+          subtitle={`${academicDetail.queueItem.student_number} · ${academicDetail.queueItem.course || "College"}`}
+          maxWidth="max-w-2xl"
+        >
+          <div className="academic-records-dialog">
+            {/* Tabs */}
+            <div className="flex gap-2 border-b border-[var(--border-color)] pb-3 mb-4">
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold ${
+                  academicSubTab === "view"
+                    ? "bg-[var(--primary-interactive)] text-white"
+                    : "bg-[var(--hover-bg)] text-[var(--secondary-text)]"
+                }`}
+                onClick={() => setAcademicSubTab("view")}
+              >
+                Existing Records
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold ${
+                  academicSubTab === "grade"
+                    ? "bg-[var(--primary-interactive)] text-white"
+                    : "bg-[var(--hover-bg)] text-[var(--secondary-text)]"
+                }`}
+                onClick={() => setAcademicSubTab("grade")}
+              >
+                + Record Grade Report
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold ${
+                  academicSubTab === "check"
+                    ? "bg-[var(--primary-interactive)] text-white"
+                    : "bg-[var(--hover-bg)] text-[var(--secondary-text)]"
+                }`}
+                onClick={() => setAcademicSubTab("check")}
+              >
+                + Record Eligibility Check
+              </button>
+            </div>
+
+            {/* TAB: VIEW RECORDS */}
+            {academicSubTab === "view" && (
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Grade Reports</h4>
+                  {(academicDetail.academicRecords?.gradeReports || []).length === 0 ? (
+                    <p className="text-xs text-muted italic">No grade reports recorded for this applicant yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {academicDetail.academicRecords.gradeReports.map((r, i) => (
+                        <div key={i} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between">
+                          <div>
+                            <strong>{r.school_year} · {r.semester}</strong>
+                            <p className="text-muted m-0">{r.remarks || "No remarks"}</p>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">GPA: {r.gpa}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Eligibility Checks</h4>
+                  {(academicDetail.academicRecords?.eligibilityChecks || []).length === 0 ? (
+                    <p className="text-xs text-muted italic">No eligibility checks recorded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {academicDetail.academicRecords.eligibilityChecks.map((c, i) => (
+                        <div key={i} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between items-center">
+                          <div>
+                            <strong>{c.check_type}</strong>
+                            <p className="text-muted m-0">{c.remarks || "No remarks"}</p>
+                          </div>
+                          <StatusBadge status={c.result} customLabel={displayStatus(c.result)} />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* TAB: ADD GRADE REPORT */}
+            {academicSubTab === "grade" && (
+              <form onSubmit={handleAddGradeReport} className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="form-field">
+                    <label className="form-label">School Year</label>
+                    <input
+                      required
+                      value={gradeForm.schoolYear}
+                      onChange={(e) => setGradeForm({ ...gradeForm, schoolYear: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="form-label">Semester</label>
+                    <input
+                      required
+                      value={gradeForm.semester}
+                      onChange={(e) => setGradeForm({ ...gradeForm, semester: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Grade Point Average (GPA)</label>
                   <input
                     required
                     type="number"
-                    min="0.01"
                     step="0.01"
-                    value={programForm.totalBudget}
-                    onChange={(event) => setProgramForm({
-                      ...programForm,
-                      totalBudget: event.target.value,
-                    })}
+                    min="0"
+                    max="5.00"
+                    placeholder="e.g. 1.75"
+                    value={gradeForm.gpa}
+                    onChange={(e) => setGradeForm({ ...gradeForm, gpa: e.target.value })}
                   />
-                </label>
-                <label>
-                  Application opens
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Registrar Remarks</label>
                   <input
-                    type="date"
-                    value={programForm.startDate}
-                    onChange={(event) => setProgramForm({
-                      ...programForm,
-                      startDate: event.target.value,
-                    })}
+                    placeholder="e.g. Cleared for scholarship quota"
+                    value={gradeForm.remarks}
+                    onChange={(e) => setGradeForm({ ...gradeForm, remarks: e.target.value })}
                   />
-                </label>
-                <label>
-                  Application closes
-                  <input
-                    type="date"
-                    value={programForm.endDate}
-                    onChange={(event) => setProgramForm({
-                      ...programForm,
-                      endDate: event.target.value,
-                    })}
-                  />
-                </label>
-                <button className="button button-primary" disabled={busy}>
-                  Create program
+                </div>
+
+                <button type="submit" className="button button-primary" disabled={busy}>
+                  {busy ? "Saving Grade Report..." : "Save Grade Report"}
                 </button>
               </form>
             )}
-          </section>}
 
-          <section className="staff-panel">
-            <h2>Applications for your funding unit</h2>
-            {data.applications.length === 0 ? (
-              <p className="staff-empty">No applications are recorded for this unit.</p>
-            ) : (
-              <div className="staff-record-list">
-                {data.applications.map((application) => (
-                  <article className="staff-record" key={application.application_id}>
-                    <div>
-                      <strong>
-                        {application.first_name} {application.last_name} ·{" "}
-                        {application.program_name}
-                      </strong>
-                      <p>
-                        {application.student_number} · {application.school_name} ·{" "}
-                        {application.barangay_name}
-                      </p>
-                      <p>{displayStatus(application.application_status)}</p>
-                    </div>
-                  </article>
-                ))}
-              </div>
+            {/* TAB: ADD ELIGIBILITY CHECK */}
+            {academicSubTab === "check" && (
+              <form onSubmit={handleAddEligibilityCheck} className="space-y-3">
+                <div className="form-field">
+                  <label className="form-label">Check Type</label>
+                  <select
+                    value={eligibilityForm.checkType}
+                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, checkType: e.target.value })}
+                  >
+                    <option value="enrollment_status">Enrollment Status</option>
+                    <option value="academic_standing">Academic Standing</option>
+                    <option value="good_moral">Good Moral Character</option>
+                    <option value="unit_load">Units Enrolled Load</option>
+                  </select>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Verification Result</label>
+                  <select
+                    value={eligibilityForm.result}
+                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, result: e.target.value })}
+                  >
+                    <option value="eligible">Eligible</option>
+                    <option value="ineligible">Ineligible</option>
+                    <option value="pending">Pending Further Audit</option>
+                  </select>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Remarks</label>
+                  <input
+                    placeholder="Optional notes or eligibility verification details"
+                    value={eligibilityForm.remarks}
+                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, remarks: e.target.value })}
+                  />
+                </div>
+
+                <button type="submit" className="button button-primary" disabled={busy}>
+                  {busy ? "Saving Eligibility Record..." : "Save Eligibility Record"}
+                </button>
+              </form>
             )}
-          </section>
-        </>
-      )}
 
-      {data && portal.base !== "admin" && (
-        <section className="staff-summary-grid" aria-label="Verification queue summary">
-          <article className="staff-summary-card">
-            <span>Pending verifications</span>
-            <strong>{data.summary.pending_count}</strong>
-          </article>
-          <article className="staff-summary-card">
-            <span>Needs information</span>
-            <strong>{data.summary.needs_information_count}</strong>
-          </article>
-        </section>
-      )}
-
-      {data && (
-        <section className="staff-panel">
-          <h2>
-            {portal.base === "admin"
-              ? "Funding-unit application review"
-              : "Verification queue"}
-          </h2>
-          {data.verifications.length === 0 ? (
-            <p className="staff-empty">There are no verification tasks in your queue.</p>
-          ) : (
-            <div className="staff-record-list">
-              {data.verifications.map((verification) => (
-                <article className="staff-record staff-record-stacked" key={verification.verification_id}>
-                  <div className="staff-record-heading">
-                    <div>
-                      <strong>
-                        {verification.first_name} {verification.last_name} ·{" "}
-                        {verification.program_name}
-                      </strong>
-                      <p>
-                        {verification.student_number} · {verification.school_name}
-                        {verification.barangay_name
-                          ? ` · ${verification.barangay_name}`
-                          : ""}
-                      </p>
-                      {verification.course && (
-                        <p>{verification.course}{verification.year_level ? ` · ${verification.year_level}` : ""}</p>
-                      )}
-                      <p>
-                        {displayStatus(verification.application_status)} ·{" "}
-                        {displayStatus(verification.status)}
-                      </p>
-                    </div>
-                    {portal.base === "registrar" && (
-                      <button
-                        className="button button-secondary"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => showRegistrarDetails(verification.verification_id)}
-                      >
-                        Academic details
-                      </button>
-                    )}
-                  </div>
-                  {portal.base === "registrar" &&
-                    selectedDetail?.verification?.verification_id === verification.verification_id && (
-                      <div className="staff-academic-records">
-                        <strong>Grade reports</strong>
-                        {selectedDetail.academicRecords.gradeReports.length === 0 ? (
-                          <p>No grade reports are recorded.</p>
-                        ) : selectedDetail.academicRecords.gradeReports.map((record, index) => (
-                          <p key={`${record.school_year}-${record.semester}-${index}`}>
-                            {record.school_year} · {record.semester} · GPA {record.gpa}
-                            {record.remarks ? ` · ${record.remarks}` : ""}
-                          </p>
-                        ))}
-                        <strong>Eligibility checks</strong>
-                        {selectedDetail.academicRecords.eligibilityChecks.length === 0 ? (
-                          <p>No eligibility checks are recorded.</p>
-                        ) : selectedDetail.academicRecords.eligibilityChecks.map((record, index) => (
-                          <p key={`${record.check_type}-${index}`}>
-                            {record.check_type} · {displayStatus(record.result)}
-                            {record.remarks ? ` · ${record.remarks}` : ""}
-                          </p>
-                        ))}
-                        <form
-                          className="staff-form staff-academic-form"
-                          hidden={developerPreview}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            saveAcademicRecord(verification, "grade-report");
-                          }}
-                        >
-                          <label>
-                            School year
-                            <input
-                              required
-                              maxLength={20}
-                              value={academicForm.schoolYear}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                schoolYear: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <label>
-                            Semester
-                            <input
-                              required
-                              maxLength={20}
-                              value={academicForm.semester}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                semester: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <label>
-                            GPA
-                            <input
-                              required
-                              type="number"
-                              min="0"
-                              max="99.99"
-                              step="0.01"
-                              value={academicForm.gpa}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                gpa: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <label>
-                            Grade report notes
-                            <input
-                              maxLength={2000}
-                              value={academicForm.gradeRemarks}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                gradeRemarks: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <button className="button button-secondary" disabled={busy}>
-                            Record grade report
-                          </button>
-                        </form>
-                        <form
-                          className="staff-form staff-academic-form"
-                          hidden={developerPreview}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            saveAcademicRecord(verification, "eligibility-check");
-                          }}
-                        >
-                          <label>
-                            Check type
-                            <input
-                              required
-                              maxLength={50}
-                              value={academicForm.checkType}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                checkType: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <label>
-                            Result
-                            <select
-                              value={academicForm.result}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                result: event.target.value,
-                              })}
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="eligible">Eligible</option>
-                              <option value="ineligible">Ineligible</option>
-                            </select>
-                          </label>
-                          <label>
-                            Eligibility notes
-                            <input
-                              maxLength={2000}
-                              value={academicForm.eligibilityRemarks}
-                              onChange={(event) => setAcademicForm({
-                                ...academicForm,
-                                eligibilityRemarks: event.target.value,
-                              })}
-                            />
-                          </label>
-                          <button className="button button-secondary" disabled={busy}>
-                            Record eligibility check
-                          </button>
-                        </form>
-                      </div>
-                    )}
-                  {!developerPreview && <label className="staff-field">
-                    Review notes
-                    <textarea
-                      maxLength={2000}
-                      value={remarks[verification.verification_id] || ""}
-                      onChange={(event) => setRemarks({
-                        ...remarks,
-                        [verification.verification_id]: event.target.value,
-                      })}
-                    />
-                  </label>}
-                  {!developerPreview && portal.base === "admin" && (
-                    <label className="staff-field staff-award-field">
-                      Award amount (PHP, required to approve)
-                      <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        value={awardAmounts[verification.verification_id] || ""}
-                        onChange={(event) => setAwardAmounts({
-                          ...awardAmounts,
-                          [verification.verification_id]: event.target.value,
-                        })}
-                      />
-                    </label>
-                  )}
-                  {!developerPreview && <div className="staff-actions">
-                    <button
-                      className="button button-primary"
-                      type="button"
-                      disabled={
-                        busy ||
-                        (portal.base === "admin" &&
-                          !(Number(awardAmounts[verification.verification_id]) > 0))
-                      }
-                      onClick={() => decideVerification(verification, "approved")}
-                    >
-                      {portal.base === "admin" ? "Approve and reserve award" : "Approve"}
-                    </button>
-                    <button
-                      className="button button-secondary"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => decideVerification(verification, "needs_information")}
-                    >
-                      Request information
-                    </button>
-                    <button
-                      className="button button-danger"
-                      type="button"
-                      disabled={busy}
-                      onClick={() => decideVerification(verification, "rejected")}
-                    >
-                      Reject
-                    </button>
-                  </div>}
-                </article>
-              ))}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-outline"
+                onClick={() => setAcademicDetail(null)}
+              >
+                Close
+              </button>
             </div>
-          )}
-        </section>
+          </div>
+        </ModalDialog>
       )}
-
-      <div className="page-actions">
-        <Link className="text-link" to="/portals">
-          <ArrowLeft size={16} aria-hidden="true" />
-          All portals
-        </Link>
-      </div>
     </div>
   );
 }

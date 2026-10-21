@@ -1,14 +1,28 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Landmark, LogOut, UserRound } from "lucide-react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { getPortalPathForRole } from "../pages/LoginPage.jsx";
+import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import Sidebar from "./Sidebar.jsx";
+import Topbar from "./Topbar.jsx";
 import { apiRequest } from "../services/api.js";
 
 export default function AppLayout() {
   const [user, setUser] = useState(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("grantwise-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
   const location = useLocation();
   const navigate = useNavigate();
+
+  // Determine if on a portal route
+  const isPortalRoute = location.pathname.startsWith("/portal");
+  const portalTypeMatch = location.pathname.match(/^\/portal\/([^/?#]+)/);
+  const currentPortalType = portalTypeMatch ? portalTypeMatch[1] : null;
 
   const checkSession = useCallback(async () => {
     try {
@@ -33,6 +47,21 @@ export default function AppLayout() {
     };
   }, [checkSession]);
 
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
+
+  function handleToggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem("grantwise-sidebar-collapsed", String(next));
+      } catch {}
+      return next;
+    });
+  }
+
   async function handleLogout() {
     setSigningOut(true);
     try {
@@ -48,67 +77,70 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <div className="header-inner">
-          <NavLink className="brand" to="/" aria-label="GrantWise home">
-            <span className="brand-mark">
-              <Landmark size={21} strokeWidth={1.8} aria-hidden="true" />
-            </span>
-            <span className="brand-copy">
-              <strong>GrantWise</strong>
-              <span>TAGBILARAN CITY</span>
-            </span>
-          </NavLink>
+    <div className={`app-shell ${isPortalRoute ? "has-dashboard-shell" : "has-public-shell"}`}>
+      {isPortalRoute ? (
+        <div className="dashboard-layout">
+          <Sidebar
+            user={user}
+            portalType={currentPortalType}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={handleToggleSidebar}
+            mobileOpen={mobileSidebarOpen}
+            onCloseMobile={() => setMobileSidebarOpen(false)}
+            onLogout={handleLogout}
+            signingOut={signingOut}
+          />
 
-          <nav className="main-nav" aria-label="Main navigation">
-            <NavLink to="/" end>
-              Home
-            </NavLink>
-            <NavLink to="/programs">Programs</NavLink>
-            <NavLink to="/application-guide">How to apply</NavLink>
-            <NavLink to="/portals">Portals</NavLink>
-            <NavLink to="/status">System status</NavLink>
-          </nav>
+          <div className="dashboard-main-area">
+            <Topbar
+              user={user}
+              portalType={currentPortalType}
+              onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+              onLogout={handleLogout}
+              signingOut={signingOut}
+              isPortalView={true}
+            />
 
-          {user ? (
-            <div className="header-auth-controls">
-              <NavLink
-                className="header-user-pill"
-                to={getPortalPathForRole(user.role)}
-                title={`Open ${user.role} portal`}
-              >
-                <UserRound size={14} aria-hidden="true" />
-                <span>{user.firstName}</span>
-                <small>{user.role}</small>
-              </NavLink>
-              <button
-                type="button"
-                className="header-link header-logout-btn"
-                onClick={handleLogout}
-                disabled={signingOut}
-              >
-                <LogOut size={14} aria-hidden="true" />
-                {signingOut ? "Signing out..." : "Sign out"}
-              </button>
-            </div>
-          ) : (
-            <NavLink className="header-link" to="/login">
-              Sign in
-              <ArrowRight size={15} aria-hidden="true" />
-            </NavLink>
-          )}
+            <main className="dashboard-content" id="main-content">
+              <Outlet />
+            </main>
+
+            <footer className="dashboard-footer">
+              <div className="footer-content">
+                <span>GrantWise Tagbilaran · LGU Scholarship Engine</span>
+                <span className="footer-tag">Official City Government System</span>
+              </div>
+            </footer>
+          </div>
         </div>
-      </header>
+      ) : (
+        <>
+          <Topbar
+            user={user}
+            portalType={null}
+            onLogout={handleLogout}
+            signingOut={signingOut}
+            isPortalView={false}
+          />
 
-      <main>
-        <Outlet />
-      </main>
+          <main id="main-content">
+            <Outlet />
+          </main>
 
-      <footer className="site-footer">
-        <span>GrantWise Tagbilaran</span>
-        <span>Scholarship and educational grant management</span>
-      </footer>
+          <footer className="site-footer">
+            <div className="footer-inner">
+              <div className="footer-brand">
+                <strong>GrantWise Tagbilaran</strong>
+                <p>Multi-Unit LGU Scholarship & Educational Grant Disbursement Engine</p>
+              </div>
+              <div className="footer-notes">
+                <span>City Government of Tagbilaran, Bohol, Philippines</span>
+                <span>In coordination with participating colleges, universities, and 15 barangays</span>
+              </div>
+            </div>
+          </footer>
+        </>
+      )}
     </div>
   );
 }
