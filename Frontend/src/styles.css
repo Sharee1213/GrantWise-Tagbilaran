@@ -3005,3 +3005,79 @@ html.dark .hero {
   border-color: var(--primary-interactive);
   color: var(--primary-interactive);
 }
+
+/* ==========================================================================
+   PAGE ACTIONS & AUTH LINKS (SPACING & HOVER PILLS)
+   ========================================================================== */
+
+.page-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-color);
+  width: 100%;
+}
+
+.page-actions .text-link,
+.page-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--main-text);
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+  padding: 8px 16px;
+  border-radius: 8px;
+  transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.page-actions .text-link:hover,
+.page-actions a:hover {
+  background: var(--badge-success-bg);
+  color: var(--primary-interactive);
+  border-color: var(--primary-interactive);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px -2px rgba(21, 128, 61, 0.22);
+  text-decoration: none;
+}
+
+.auth-submit-btn {
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 10px;
+}
+
+.field-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--badge-warning-text);
+  margin-top: 6px;
+}
+
+.field-error {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--badge-danger-text);
+  margin-top: 6px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--secondary-text);
+  margin-top: 6px;
+}
