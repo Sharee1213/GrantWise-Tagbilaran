@@ -505,6 +505,76 @@ class FakePool {
 }
 
 class StaffPortalPool extends FakePool {
+    seedBudgetAuditState(overrides = {}) {
+        const baseState = {
+            program: {
+                program_id: 701,
+                funding_unit_id: 41,
+                funding_cycle_id: 901,
+                total_budget: 1000,
+                remaining_budget: 900,
+                reserved_budget: 100,
+                released_budget: 0
+            },
+            allocation: {
+                allocation_id: 1,
+                program_id: 701,
+                barangay_id: 7,
+                allocated_amount: 600,
+                reserved_amount: 100,
+                released_amount: 0
+            },
+            award: {
+                award_id: 8001,
+                award_amount: 250,
+                award_status: "pending"
+            },
+            disbursement: {
+                disbursement_id: 9001,
+                award_id: 8001,
+                amount: 125,
+                status: "pending"
+            },
+            releasedBefore: 0
+        };
+
+        this.fundingAuditState = {
+            ...baseState,
+            ...overrides,
+            program: {
+                ...baseState.program,
+                ...(overrides.program || {})
+            },
+            allocation: {
+                ...baseState.allocation,
+                ...(overrides.allocation || {})
+            },
+            award: {
+                ...baseState.award,
+                ...(overrides.award || {})
+            },
+            disbursement: {
+                ...baseState.disbursement,
+                ...(overrides.disbursement || {})
+            }
+        };
+        return this.fundingAuditState;
+    }
+
+    async withBudgetLock(callback) {
+        const previous = this._budgetLock || Promise.resolve();
+        let releaseLock;
+        this._budgetLock = new Promise((resolve) => {
+            releaseLock = resolve;
+        });
+        await previous;
+        try {
+            return await callback();
+        } finally {
+            releaseLock();
+        }
+    }
+
     async query(query, values = []) {
         const sql = query.replace(/\s+/g, " ").trim();
         this.queries ||= [];
@@ -684,13 +754,102 @@ class StaffPortalPool extends FakePool {
             return { rowCount: 1, rows: [this.insertedAward] };
         }
         if (sql === "SELECT approve_award($1, $2)") {
-            if (this.awardFailure) {
-                throw Object.assign(new Error("private funding failure"), {
-                    code: "P0001"
-                });
-            }
-            this.approvedAwardValues = values;
-            return { rowCount: 1, rows: [{}] };
+            return this.withBudgetLock(async () => {
+                if (this.awardFailure) {
+                    throw Object.assign(new Error("private funding failure"), {
+                        code: "P0001"
+                    });
+                }
+
+                const state = this.fundingAuditState || {
+                    program: {
+                        remaining_budget: 1000,
+                        reserved_budget: 0,
+                        released_budget: 0
+                    },
+                    allocation: {
+                        allocated_amount: 1000,
+                        reserved_amount: 0,
+                        released_amount: 0
+                    },
+                    award: { award_amount: 100 }
+                };
+                const awardAmount = Number(state.award?.award_amount ?? 0);
+
+                if (
+                    state.program.remaining_budget - state.program.reserved_budget <
+                    awardAmount
+                ) {
+                    throw new Error(
+                        "Not enough available program budget for award approval."
+                    );
+                }
+                if (
+                    state.allocation.allocated_amount -
+                    state.allocation.reserved_amount -
+                    state.allocation.released_amount <
+                    awardAmount
+                ) {
+                    throw new Error(
+                        "Barangay program allocation is insufficient for award approval."
+                    );
+                }
+
+                state.program.reserved_budget += awardAmount;
+                state.allocation.reserved_amount += awardAmount;
+                this.approvedAwardValues = values;
+                return { rowCount: 1, rows: [{}] };
+            });
+        }
+        if (sql === "SELECT release_disbursement($1, $2)") {
+            return this.withBudgetLock(async () => {
+                const state = this.fundingAuditState || {
+                    program: {
+                        remaining_budget: 1000,
+                        reserved_budget: 0,
+                        released_budget: 0
+                    },
+                    allocation: {
+                        reserved_amount: 0,
+                        released_amount: 0
+                    },
+                    award: { award_amount: 0 },
+                    disbursement: { amount: 0 },
+                    releasedBefore: 0
+                };
+                const releaseAmount = Number(state.disbursement?.amount ?? 0);
+                const releasedBefore = Number(state.releasedBefore ?? 0);
+
+                if (
+                    state.program.remaining_budget < releaseAmount ||
+                    state.program.reserved_budget < releaseAmount
+                ) {
+                    throw new Error(
+                        "Program funds are insufficient or not reserved for this release."
+                    );
+                }
+                if (state.allocation.reserved_amount < releaseAmount) {
+                    throw new Error(
+                        "Barangay allocation funds are insufficient or not reserved for this release."
+                    );
+                }
+                if (
+                    releasedBefore + releaseAmount >
+                    Number(state.award?.award_amount ?? 0)
+                ) {
+                    throw new Error(
+                        "Cumulative disbursements cannot exceed the award amount."
+                    );
+                }
+
+                state.program.remaining_budget -= releaseAmount;
+                state.program.reserved_budget -= releaseAmount;
+                state.program.released_budget += releaseAmount;
+                state.allocation.reserved_amount -= releaseAmount;
+                state.allocation.released_amount += releaseAmount;
+                state.releasedBefore = releasedBefore + releaseAmount;
+                return { rowCount: 1, rows: [{}] };
+            });
         }
         if (sql.startsWith('INSERT INTO "Audit_Logs"')) {
             return { rowCount: 1, rows: [] };
@@ -1383,6 +1542,272 @@ test("LGU award approval requires valid input and delegates funding checks to th
         blocked.body.message.includes("private funding failure"),
         false
     );
+});
+
+test("LGU budget audit: award approval reserves funds without reducing remaining_budget", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState();
+
+    await pool.query("SELECT approve_award($1, $2)", [
+        pool.fundingAuditState.award.award_id,
+        fixtureUsers.adminA.user_id
+    ]);
+
+    assert.equal(pool.fundingAuditState.program.remaining_budget, 900);
+    assert.equal(pool.fundingAuditState.program.reserved_budget, 350);
+    assert.equal(pool.fundingAuditState.program.released_budget, 0);
+    assert.equal(pool.fundingAuditState.allocation.reserved_amount, 350);
+    assert.equal(pool.fundingAuditState.allocation.released_amount, 0);
+});
+
+test("LGU budget audit: release reduces remaining and reserved balances while increasing released balances", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 900,
+            reserved_budget: 350,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 350,
+            released_amount: 0
+        },
+        disbursement: {
+            disbursement_id: 9001,
+            award_id: 8001,
+            amount: 125,
+            status: "pending"
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 250,
+            award_status: "approved"
+        }
+    });
+
+    await pool.query("SELECT release_disbursement($1, $2)", [
+        pool.fundingAuditState.disbursement.disbursement_id,
+        fixtureUsers.adminA.user_id
+    ]);
+
+    assert.equal(pool.fundingAuditState.program.remaining_budget, 775);
+    assert.equal(pool.fundingAuditState.program.reserved_budget, 225);
+    assert.equal(pool.fundingAuditState.program.released_budget, 125);
+    assert.equal(pool.fundingAuditState.allocation.reserved_amount, 225);
+    assert.equal(pool.fundingAuditState.allocation.released_amount, 125);
+});
+
+test("LGU budget audit: approval rejects insufficient program available funds", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 900,
+            reserved_budget: 100,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 100,
+            released_amount: 0
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 801,
+            award_status: "pending"
+        }
+    });
+
+    await assert.rejects(
+        () => pool.query("SELECT approve_award($1, $2)", [
+            pool.fundingAuditState.award.award_id,
+            fixtureUsers.adminA.user_id
+        ]),
+        /Not enough available program budget for award approval\./
+    );
+});
+
+test("LGU budget audit: approval rejects insufficient barangay allocation availability", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 900,
+            reserved_budget: 100,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 500,
+            released_amount: 0
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 101,
+            award_status: "pending"
+        }
+    });
+
+    await assert.rejects(
+        () => pool.query("SELECT approve_award($1, $2)", [
+            pool.fundingAuditState.award.award_id,
+            fixtureUsers.adminA.user_id
+        ]),
+        /Barangay program allocation is insufficient for award approval\./
+    );
+});
+
+test("LGU budget audit: release rejects disbursement beyond the award's unreleased amount", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 900,
+            reserved_budget: 250,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 250,
+            released_amount: 0
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 250,
+            award_status: "approved"
+        },
+        disbursement: {
+            disbursement_id: 9001,
+            award_id: 8001,
+            amount: 75,
+            status: "pending"
+        },
+        releasedBefore: 200
+    });
+
+    await assert.rejects(
+        () => pool.query("SELECT release_disbursement($1, $2)", [
+            pool.fundingAuditState.disbursement.disbursement_id,
+            fixtureUsers.adminA.user_id
+        ]),
+        /Cumulative disbursements cannot exceed the award amount\./
+    );
+});
+
+test("LGU budget audit: concurrent approvals honor the same available-funds guard under serialized row locks", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 1000,
+            reserved_budget: 100,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 100,
+            released_amount: 0
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 500,
+            award_status: "pending"
+        }
+    });
+
+    const results = await Promise.allSettled([
+        pool.query("SELECT approve_award($1, $2)", [8001, fixtureUsers.adminA.user_id]),
+        pool.query("SELECT approve_award($1, $2)", [8002, fixtureUsers.adminA.user_id])
+    ]);
+
+    assert.equal(
+        results.filter((result) => result.status === "fulfilled").length,
+        1
+    );
+    assert.equal(pool.fundingAuditState.program.reserved_budget, 600);
+    assert.equal(pool.fundingAuditState.allocation.reserved_amount, 600);
+});
+
+test("LGU budget audit: concurrent releases cannot exceed the award amount or double-release the same funds", async () => {
+    const pool = new StaffPortalPool();
+    pool.seedBudgetAuditState({
+        program: {
+            program_id: 701,
+            funding_unit_id: 41,
+            funding_cycle_id: 901,
+            total_budget: 1000,
+            remaining_budget: 900,
+            reserved_budget: 250,
+            released_budget: 0
+        },
+        allocation: {
+            allocation_id: 1,
+            program_id: 701,
+            barangay_id: 7,
+            allocated_amount: 600,
+            reserved_amount: 250,
+            released_amount: 0
+        },
+        award: {
+            award_id: 8001,
+            award_amount: 250,
+            award_status: "approved"
+        },
+        disbursement: {
+            disbursement_id: 9001,
+            award_id: 8001,
+            amount: 150,
+            status: "pending"
+        },
+        releasedBefore: 0
+    });
+
+    const results = await Promise.allSettled([
+        pool.query("SELECT release_disbursement($1, $2)", [
+            pool.fundingAuditState.disbursement.disbursement_id,
+            fixtureUsers.adminA.user_id
+        ]),
+        pool.query("SELECT release_disbursement($1, $2)", [9002, fixtureUsers.adminA.user_id])
+    ]);
+
+    assert.equal(
+        results.filter((result) => result.status === "fulfilled").length,
+        1
+    );
+    assert.equal(pool.fundingAuditState.program.released_budget, 150);
+    assert.equal(pool.fundingAuditState.allocation.released_amount, 150);
 });
 
 test("staff dashboards remain disabled when required workflow objects are absent", async () => {
@@ -3138,6 +3563,52 @@ test("10. Ordinary staff cannot create/revoke invitations and LGU granular permi
         .send({ status: "approved", awardAmount: 10000 });
     assert.equal(approveRes.status, 403);
     assert.match(approveRes.body.message, /award_approval/);
+
+    // Cannot provision staff accounts without program_management permission
+    const forbiddenProvisionRes = await request(testApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${readOnlySession}`)
+        .send({
+            role: "Barangay Coordinator",
+            firstName: "Blocked",
+            lastName: "Provision",
+            email: "blocked.provision@gmail.com",
+            password: "a sufficiently long password",
+            barangayId: 1
+        });
+    assert.equal(forbiddenProvisionRes.status, 403);
+    assert.match(forbiddenProvisionRes.body.message, /program_management/);
+
+    // An authorized LGU admin with program_management can provision a staff account
+    const authorizedUserId = pool.seedUser({
+        email: "authorized.provision@admin.com",
+        roleName: "LGU Admin",
+        fundingUnitId: 41,
+        staffAuthStatus: "active",
+        lguPermissions: {
+            read_only_reports: true,
+            program_management: true,
+            application_review: true,
+            award_approval: true,
+            disbursement_release: false
+        }
+    });
+    const authorizedSession = pool.issueSessionToken(authorizedUserId);
+
+    const authorizedProvisionRes = await request(testApp)
+        .post("/api/admin/staff-accounts")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", `${SESSION_COOKIE}=${authorizedSession}`)
+        .send({
+            role: "Barangay Coordinator",
+            firstName: "Allowed",
+            lastName: "Provision",
+            email: "allowed.provision@gmail.com",
+            password: "a sufficiently long password",
+            barangayId: 13
+        });
+    assert.equal(authorizedProvisionRes.status, 201);
 });
 
 // ---------------------------------------------------------------------------

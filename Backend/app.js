@@ -2856,6 +2856,7 @@ function createApp({
     "/api/admin/staff-accounts",
     requireAuthentication,
     requireRole("LGU Admin"),
+    requireLguPermission("program_management"),
     async (req, res, next) => {
       if (!(await requireStaffSchema(res, { admin: true }))) return;
       const input = staffProvisionSchema.safeParse(req.body);
