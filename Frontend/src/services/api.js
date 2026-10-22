@@ -5,11 +5,16 @@ const configuredBaseUrl = (
 export const API_BASE_URL = `${configuredBaseUrl.replace(/(?:\/api)+$/i, "")}/api`;
 
 export class ApiError extends Error {
-  constructor(message, status, payload) {
+  constructor(message, status, payload, fieldErrors = []) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
+    this.fieldErrors = Array.isArray(fieldErrors)
+      ? fieldErrors
+      : Array.isArray(payload?.errors)
+        ? payload.errors
+        : [];
   }
 }
 
@@ -51,6 +56,7 @@ async function requestJson(url, options = {}) {
       payload?.message || `Request failed with status ${response.status}.`,
       response.status,
       payload,
+      payload?.errors,
     );
   }
 
