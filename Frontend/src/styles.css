@@ -2631,6 +2631,13 @@ html.dark .hero {
   z-index: 1;
 }
 
+
+   @media (max-width: 900px) {
+     .hero-seal {
+       display: none;
+     }
+   }
+   
 .seal-ring {
   width: 220px;
   height: 220px;
