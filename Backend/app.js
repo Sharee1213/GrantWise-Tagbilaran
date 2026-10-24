@@ -20,6 +20,7 @@ const {
 } = require("./lib/responseHelpers");
 const {
   DEFAULT_DEVELOPER_ALLOWLIST,
+  EXACT_ROLE_EMAIL_LOGIN_EXCEPTIONS,
   LGU_PERMISSION_CATEGORIES,
   DEFAULT_LGU_PERMISSIONS,
   PROPOSED_LGU_OFFICIALS_DIRECTORY,
@@ -268,6 +269,13 @@ function validateEmailForRole(
   }
 
   const { domain, normalized } = parsed;
+
+  if (
+    options.allowExactRoleEmailLoginException === true &&
+    EXACT_ROLE_EMAIL_LOGIN_EXCEPTIONS[normalized] === role
+  ) {
+    return { valid: true, normalizedEmail: normalized, domain };
+  }
 
   if (role === "System Admin") {
     const allowlist =
@@ -2040,6 +2048,7 @@ function createApp({
       {
         isDeveloperAuthorized: user.staff_auth_status === "active",
         schoolDomain: user.verified_school_domains || null,
+        allowExactRoleEmailLoginException: true,
       },
     );
     if (!roleEmailCheck.valid) {
@@ -2240,6 +2249,7 @@ function createApp({
         {
           isDeveloperAuthorized: row.staff_auth_status === "active",
           schoolDomain: row.verified_school_domains || null,
+          allowExactRoleEmailLoginException: true,
         },
       );
       if (!roleEmailCheck.valid) {

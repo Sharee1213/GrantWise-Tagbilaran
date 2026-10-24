@@ -88,6 +88,11 @@ match exactly on both client and server. The browser displays a local,
 length-based strength estimate. Login preserves compatibility with existing
 Argon2id passwords shorter than the new-password minimum. Developer bootstrap refuses to replace
 an existing account or change its password, role, or active state.
+Role-specific Gmail login exceptions are exact-address entries in
+`Backend/staff-directory-config.js`. They apply only during login/session
+validation and do not bypass active-account, assigned-role, staff-authorization,
+or scope checks; they do not relax provisioning rules or allow Gmail generally
+for LGU Admins or Registrars.
 Unsafe API requests require an allowed Origin and the API uses credentialed
 CORS configured for the frontend origin.
 

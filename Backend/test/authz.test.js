@@ -3,7 +3,12 @@ const argon2 = require("argon2");
 const crypto = require("node:crypto");
 const { before, test } = require("node:test");
 const request = require("supertest");
-const { createApp, SESSION_COOKIE } = require("../app");
+const {
+    createApp,
+    getEmailPolicyConfig,
+    SESSION_COOKIE,
+    validateEmailForRole
+} = require("../app");
 
 const FRONTEND_ORIGIN = "http://localhost:5173";
 
@@ -1920,6 +1925,116 @@ test("LGU Admin email policy rejects personal Gmail and enforces configured ALLO
         });
     assert.equal(mismatchLogin.status, 403);
     assert.match(mismatchLogin.body.message, /official LGU/i);
+});
+
+test("exact Gmail login exceptions apply only to their listed role and never to provisioning", () => {
+    const policy = getEmailPolicyConfig({
+        INITIAL_DEVELOPER_ALLOWLIST: "cuevas.sharee_angela@hnu.edu.ph"
+    });
+    const exceptions = [
+        ["admin.marie@gmail.com", "System Admin"],
+        ["admin.ellaine@gmail.com", "System Admin"],
+        ["admin.angela@gmail.com", "System Admin"],
+        ["admin.tagbilarancitylgu@gmail.com", "LGU Admin"],
+        ["registar.holynameuniversity@gmail.com", "Registrar"],
+        ["registar.tagbilarancitycollege@gmail.com", "Registrar"],
+        ["registar.boholislandstateuniv@gmail.com", "Registrar"],
+        ["registar.universityofbohol@gmail.com", "Registrar"]
+    ];
+
+    for (const [email, role] of exceptions) {
+        const mismatchedRole = role === "System Admin"
+            ? "LGU Admin"
+            : "System Admin";
+        const regularPolicyOptions = role === "Registrar"
+            ? { schoolDomain: ["assigned-school.edu.ph"] }
+            : {};
+        assert.equal(
+            validateEmailForRole(email, role, policy, {
+                allowExactRoleEmailLoginException: true
+            }).valid,
+            true,
+            `${role} login exception for ${email}`
+        );
+        assert.equal(
+            validateEmailForRole(email, role, policy, regularPolicyOptions).valid,
+            false,
+            `${email} must not bypass the regular provisioning policy`
+        );
+        assert.equal(
+            validateEmailForRole(email, mismatchedRole, policy, {
+                allowExactRoleEmailLoginException: true,
+                schoolDomain: ["assigned-school.edu.ph"]
+            }).valid,
+            false,
+            `${email} must not be accepted under a different role`
+        );
+    }
+
+    assert.equal(
+        validateEmailForRole("unlisted@gmail.com", "LGU Admin", policy, {
+            allowExactRoleEmailLoginException: true,
+            isDeveloperAuthorized: true
+        }).valid,
+        false,
+        "unlisted Gmail addresses remain blocked for LGU Admin"
+    );
+    assert.equal(
+        validateEmailForRole("unlisted@gmail.com", "Registrar", policy, {
+            allowExactRoleEmailLoginException: true,
+            schoolDomain: ["hnu.edu.ph"]
+        }).valid,
+        false,
+        "unlisted Gmail addresses remain blocked for Registrar"
+    );
+});
+
+test("listed Gmail accounts can log in only with their currently assigned staff roles", async () => {
+    const pool = new StaffAuthStatefulPool();
+    const accounts = [
+        ["admin.marie@gmail.com", "System Admin"],
+        ["admin.ellaine@gmail.com", "System Admin"],
+        ["admin.angela@gmail.com", "System Admin"],
+        ["admin.tagbilarancitylgu@gmail.com", "LGU Admin"],
+        ["registar.holynameuniversity@gmail.com", "Registrar", 1],
+        ["registar.tagbilarancitycollege@gmail.com", "Registrar", 4],
+        ["registar.boholislandstateuniv@gmail.com", "Registrar", 2],
+        ["registar.universityofbohol@gmail.com", "Registrar", 3]
+    ];
+
+    for (const [email, role, schoolId] of accounts) {
+        pool.seedUser({
+            email,
+            roleName: role,
+            schoolId,
+            fundingUnitId: role === "LGU Admin" ? 41 : null,
+            staffAuthStatus: role === "System Admin" ? null : "active"
+        });
+    }
+
+    const testApp = createStatefulTestApp(pool);
+    for (const [email, role] of accounts) {
+        const login = await request(testApp)
+            .post("/api/auth/login")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                email,
+                password: "correct horse battery staple"
+            });
+        assert.equal(login.status, 200, `login for ${role}`);
+        assert.equal(login.body.user.email, email);
+        assert.equal(login.body.user.role, role);
+
+        const cookie = login.headers["set-cookie"]
+            .find((value) => value.startsWith(`${SESSION_COOKIE}=`))
+            .split(";")[0];
+        const session = await request(testApp)
+            .get("/api/auth/me")
+            .set("Cookie", cookie);
+        assert.equal(session.status, 200, `session for ${role}`);
+        assert.equal(session.body.user.email, email);
+        assert.equal(session.body.user.role, role);
+    }
 });
 
 test("privileged staff provisioning requires LGU Admin authentication and enforces role-specific email policies", async () => {

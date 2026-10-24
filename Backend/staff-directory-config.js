@@ -4,6 +4,17 @@ const DEFAULT_DEVELOPER_ALLOWLIST = Object.freeze([
     "palaca.szarina@hnu.edu.ph"
 ]);
 
+const EXACT_ROLE_EMAIL_LOGIN_EXCEPTIONS = Object.freeze({
+    "admin.marie@gmail.com": "System Admin",
+    "admin.ellaine@gmail.com": "System Admin",
+    "admin.angela@gmail.com": "System Admin",
+    "admin.tagbilarancitylgu@gmail.com": "LGU Admin",
+    "registar.holynameuniversity@gmail.com": "Registrar",
+    "registar.tagbilarancitycollege@gmail.com": "Registrar",
+    "registar.boholislandstateuniv@gmail.com": "Registrar",
+    "registar.universityofbohol@gmail.com": "Registrar"
+});
+
 const LGU_PERMISSION_CATEGORIES = Object.freeze([
     {
         key: "read_only_reports",
@@ -169,6 +180,7 @@ const DEFAULT_SCHOOL_DOMAIN_BY_NAME = Object.freeze({
 
 module.exports = {
     DEFAULT_DEVELOPER_ALLOWLIST,
+    EXACT_ROLE_EMAIL_LOGIN_EXCEPTIONS,
     LGU_PERMISSION_CATEGORIES,
     DEFAULT_LGU_PERMISSIONS,
     PROPOSED_LGU_OFFICIALS_DIRECTORY,
