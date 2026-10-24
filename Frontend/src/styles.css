@@ -3144,3 +3144,43 @@ html.dark .hero {
   color: var(--secondary-text);
   margin-top: 6px;
 }
+
+/* ========================================
+   Accessibility foundations
+   ======================================== */
+
+/* Make keyboard focus visible without changing normal mouse interactions. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 3px solid var(--mint, #8ce8c1);
+  outline-offset: 3px;
+}
+
+/* Keep keyboard focus visible on dark or colored surfaces. */
+:where(button, input, select, textarea, summary, [tabindex]):focus-visible {
+  scroll-margin-block: 1rem;
+}
+
+/* Visually hide content while keeping it available to screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

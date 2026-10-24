@@ -12,24 +12,11 @@ import {
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
 import { apiRequest } from "../services/api.js";
+import { getPortalPathForRole } from "../services/portalPaths.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-export function getPortalPathForRole(role, programId = null, dashboardPath = null) {
-  if (role === "Scholar") {
-    return programId && /^\d+$/.test(programId)
-      ? `/portal/student?programId=${encodeURIComponent(programId)}`
-      : "/portal/student";
-  }
-  if (role === "System Admin") return "/portal/system-admin";
-  if (role === "LGU Admin") return "/portal/lgu-admin";
-  if (role === "Barangay Coordinator") return "/portal/barangay-coordinator";
-  if (role === "Registrar") return "/portal/school-registrar";
-  if (typeof dashboardPath === "string" && dashboardPath.startsWith("/portal/")) {
-    return dashboardPath;
-  }
-  return "/portals";
-}
+export { getPortalPathForRole };
 
 function validateLoginFields({ email, password }) {
   const errors = {};
