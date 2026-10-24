@@ -1,8 +1,24 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import LoadingSkeleton from "./LoadingSkeleton.jsx";
 import Sidebar from "./Sidebar.jsx";
 import Topbar from "./Topbar.jsx";
 import { apiRequest } from "../services/api.js";
+
+// Keeps the header/sidebar on screen while a lazily loaded page downloads.
+function PageOutlet() {
+  return (
+    <Suspense
+      fallback={
+        <div className="page-container" role="status" aria-live="polite">
+          <LoadingSkeleton type="card" lines={4} />
+        </div>
+      }
+    >
+      <Outlet />
+    </Suspense>
+  );
+}
 
 export default function AppLayout() {
   const [user, setUser] = useState(null);
@@ -78,6 +94,9 @@ export default function AppLayout() {
 
   return (
     <div className={`app-shell ${isPortalRoute ? "has-dashboard-shell" : "has-public-shell"}`}>
+      <a className="skip-link" href="#main-content">
+        Skip to main content
+      </a>
       {isPortalRoute ? (
         <div className="dashboard-layout">
           <Sidebar
@@ -101,8 +120,8 @@ export default function AppLayout() {
               isPortalView={true}
             />
 
-            <main className="dashboard-content" id="main-content">
-              <Outlet />
+            <main className="dashboard-content" id="main-content" tabIndex={-1}>
+              <PageOutlet />
             </main>
 
             <footer className="dashboard-footer">
@@ -123,8 +142,8 @@ export default function AppLayout() {
             isPortalView={false}
           />
 
-          <main id="main-content">
-            <Outlet />
+          <main id="main-content" tabIndex={-1}>
+            <PageOutlet />
           </main>
 
           <footer className="site-footer">
