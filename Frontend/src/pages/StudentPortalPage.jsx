@@ -26,7 +26,7 @@ import ModalDialog from "../components/ModalDialog.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import LoadingSkeleton from "../components/LoadingSkeleton.jsx";
-import { getPortalPathForRole } from "./LoginPage.jsx";
+import { getPortalPathForRole } from "../services/portalPaths.js";
 import { apiRequest } from "../services/api.js";
 
 function statusLabel(status) {
@@ -42,7 +42,8 @@ export default function StudentPortalPage() {
   const [profile, setProfile] = useState(null);
   const [programs, setPrograms] = useState([]);
   const [applications, setApplications] = useState([]);
-  const [applicationSubmissionEnabled, setApplicationSubmissionEnabled] = useState(false);
+  const [applicationSubmissionEnabled, setApplicationSubmissionEnabled] =
+    useState(false);
   const [details, setDetails] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -88,9 +89,14 @@ export default function StudentPortalPage() {
     } catch (requestError) {
       if (requestError.status === 401) {
         const programId = searchParams.get("programId");
-        navigate(programId ? `/login?programId=${encodeURIComponent(programId)}` : "/login", {
-          replace: true,
-        });
+        navigate(
+          programId
+            ? `/login?programId=${encodeURIComponent(programId)}`
+            : "/login",
+          {
+            replace: true,
+          },
+        );
       } else {
         setError(requestError.message || "Could not load your student portal.");
       }
@@ -219,7 +225,10 @@ export default function StudentPortalPage() {
         [applicationId]: result,
       }));
     } catch (requestError) {
-      setError(requestError.message || "Could not load application verification records.");
+      setError(
+        requestError.message ||
+          "Could not load application verification records.",
+      );
     } finally {
       setLoadingDetail(null);
     }
@@ -252,7 +261,11 @@ export default function StudentPortalPage() {
             onClick={loadData}
             disabled={loading}
           >
-            <RefreshCw size={15} className={loading ? "spin" : ""} aria-hidden="true" />
+            <RefreshCw
+              size={15}
+              className={loading ? "spin" : ""}
+              aria-hidden="true"
+            />
             <span>Refresh Portal</span>
           </button>
         </div>
@@ -291,16 +304,37 @@ export default function StudentPortalPage() {
                   <h2 className="profile-hero-name">
                     {currentUser?.firstName} {currentUser?.lastName}
                   </h2>
-                  <span className="profile-hero-badge">Scholar / Applicant</span>
+                  <span className="profile-hero-badge">
+                    Scholar / Applicant
+                  </span>
                 </div>
                 <div className="profile-hero-meta">
-                  <span>Student ID: <strong>{profile?.student_number || "Not assigned"}</strong></span>
+                  <span>
+                    Student ID:{" "}
+                    <strong>{profile?.student_number || "Not assigned"}</strong>
+                  </span>
                   <span>·</span>
-                  <span>School: <strong>{profile?.school_name || "Tagbilaran Institution"}</strong></span>
+                  <span>
+                    School:{" "}
+                    <strong>
+                      {profile?.school_name || "Tagbilaran Institution"}
+                    </strong>
+                  </span>
                   <span>·</span>
-                  <span>Residency: <strong>Brgy. {profile?.barangay_name || "Tagbilaran"}</strong></span>
+                  <span>
+                    Residency:{" "}
+                    <strong>
+                      Brgy. {profile?.barangay_name || "Tagbilaran"}
+                    </strong>
+                  </span>
                   <span>·</span>
-                  <span>Curriculum: <strong>{profile?.course || "College"} ({profile?.year_level || "1st Year"})</strong></span>
+                  <span>
+                    Curriculum:{" "}
+                    <strong>
+                      {profile?.course || "College"} (
+                      {profile?.year_level || "1st Year"})
+                    </strong>
+                  </span>
                 </div>
               </div>
             </div>
@@ -341,7 +375,10 @@ export default function StudentPortalPage() {
             />
             <StatCard
               title="Approved Awards"
-              value={applications.filter((a) => a.application_status === "approved").length}
+              value={
+                applications.filter((a) => a.application_status === "approved")
+                  .length
+              }
               subtext="Committed scholarship grants"
               icon={CheckCircle2}
               variant="success"
@@ -361,7 +398,8 @@ export default function StudentPortalPage() {
               <div>
                 <h2>My Scholarship Applications</h2>
                 <p className="text-muted text-xs">
-                  Review the real-time lifecycle stages for all your submitted applications.
+                  Review the real-time lifecycle stages for all your submitted
+                  applications.
                 </p>
               </div>
             </div>
@@ -379,17 +417,32 @@ export default function StudentPortalPage() {
                   const isLoadingThis = loadingDetail === app.application_id;
 
                   return (
-                    <div key={app.application_id} className="application-scholar-card">
+                    <div
+                      key={app.application_id}
+                      className="application-scholar-card"
+                    >
                       <div className="app-card-top">
                         <div>
-                          <span className="app-card-eyebrow">APPLICATION #{app.application_id}</span>
+                          <span className="app-card-eyebrow">
+                            APPLICATION #{app.application_id}
+                          </span>
                           <h3 className="app-card-title">{app.program_name}</h3>
                           <div className="app-card-meta">
                             <span>Cycle: {app.funding_cycle || "Current"}</span>
                             <span>·</span>
-                            <span>Submitted: {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString("en-PH") : "Draft"}</span>
+                            <span>
+                              Submitted:{" "}
+                              {app.submitted_at
+                                ? new Date(app.submitted_at).toLocaleDateString(
+                                    "en-PH",
+                                  )
+                                : "Draft"}
+                            </span>
                             <span>·</span>
-                            <span>Barangay: Brgy. {app.barangay_name || profile?.barangay_name}</span>
+                            <span>
+                              Barangay: Brgy.{" "}
+                              {app.barangay_name || profile?.barangay_name}
+                            </span>
                           </div>
                         </div>
 
@@ -427,17 +480,29 @@ export default function StudentPortalPage() {
                           </h4>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             {(detail.verifications || []).map((v) => (
-                              <div key={v.verification_type} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs">
+                              <div
+                                key={v.verification_type}
+                                className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs"
+                              >
                                 <div className="flex justify-between items-center mb-1">
-                                  <strong className="capitalize">{v.verification_type} Verification</strong>
-                                  <StatusBadge status={v.status} type="verification" />
+                                  <strong className="capitalize">
+                                    {v.verification_type} Verification
+                                  </strong>
+                                  <StatusBadge
+                                    status={v.status}
+                                    type="verification"
+                                  />
                                 </div>
                                 <p className="text-muted m-0">
-                                  {v.remarks ? `"${v.remarks}"` : "Pending reviewer remarks."}
+                                  {v.remarks
+                                    ? `"${v.remarks}"`
+                                    : "Pending reviewer remarks."}
                                 </p>
                                 {v.reviewed_at && (
                                   <span className="text-[10px] text-muted block mt-1">
-                                    {new Date(v.reviewed_at).toLocaleString("en-PH")}
+                                    {new Date(v.reviewed_at).toLocaleString(
+                                      "en-PH",
+                                    )}
                                   </span>
                                 )}
                               </div>
@@ -458,14 +523,17 @@ export default function StudentPortalPage() {
               <div>
                 <h2>Available Tagbilaran Scholarship Programs</h2>
                 <p className="text-muted text-xs">
-                  Programs currently open for application from participating funding units.
+                  Programs currently open for application from participating
+                  funding units.
                 </p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {openPrograms.map((prog) => {
-                const isAlreadyApplied = appliedProgramIds.has(Number(prog.program_id));
+                const isAlreadyApplied = appliedProgramIds.has(
+                  Number(prog.program_id),
+                );
                 return (
                   <div key={prog.program_id} className="program-scholar-card">
                     <div className="program-scholar-badge">
@@ -473,14 +541,25 @@ export default function StudentPortalPage() {
                       <span>{prog.funding_unit_name || "LGU Tagbilaran"}</span>
                     </div>
 
-                    <h3 className="program-scholar-title">{prog.program_name}</h3>
-                    <p className="program-scholar-cycle">Cycle: {prog.funding_cycle || "2026"}</p>
+                    <h3 className="program-scholar-title">
+                      {prog.program_name}
+                    </h3>
+                    <p className="program-scholar-cycle">
+                      Cycle: {prog.funding_cycle || "2026"}
+                    </p>
 
                     <div className="program-scholar-dates">
                       <Calendar size={13} aria-hidden="true" />
                       <span>
-                        {prog.start_date ? new Date(prog.start_date).toLocaleDateString("en-PH") : "Open"} –{" "}
-                        {prog.end_date ? new Date(prog.end_date).toLocaleDateString("en-PH") : "Open until filled"}
+                        {prog.start_date
+                          ? new Date(prog.start_date).toLocaleDateString(
+                              "en-PH",
+                            )
+                          : "Open"}{" "}
+                        –{" "}
+                        {prog.end_date
+                          ? new Date(prog.end_date).toLocaleDateString("en-PH")
+                          : "Open until filled"}
                       </span>
                     </div>
 
@@ -522,7 +601,9 @@ export default function StudentPortalPage() {
       >
         <form onSubmit={handleVerifyEmail} className="space-y-4">
           <p className="text-xs text-muted leading-relaxed">
-            GrantWise sends a verification token to verify your school or personal Gmail account. This confirms account ownership; your school registrar performs academic verification separately.
+            GrantWise sends a verification token to verify your school or
+            personal Gmail account. This confirms account ownership; your school
+            registrar performs academic verification separately.
           </p>
 
           <div className="form-field">
@@ -537,7 +618,9 @@ export default function StudentPortalPage() {
 
           {issuedDevToken && (
             <div className="p-3 rounded-lg bg-[var(--hover-bg)] border border-[var(--border-color)] text-xs font-mono break-all">
-              <span className="text-muted block text-[10px]">Development Token:</span>
+              <span className="text-muted block text-[10px]">
+                Development Token:
+              </span>
               {issuedDevToken}
             </div>
           )}
@@ -570,7 +653,9 @@ export default function StudentPortalPage() {
         <ConfirmDialog
           isOpen={Boolean(confirmApplyProgram)}
           onClose={() => setConfirmApplyProgram(null)}
-          onConfirm={() => executeSubmitApplication(Number(confirmApplyProgram.program_id))}
+          onConfirm={() =>
+            executeSubmitApplication(Number(confirmApplyProgram.program_id))
+          }
           title="Submit Scholarship Application"
           message={`Are you ready to submit your application for '${confirmApplyProgram.program_name}'? Your verified student profile and residency credentials will be forwarded to your Barangay Coordinator and School Registrar.`}
           confirmText="Confirm & Submit Application"
