@@ -370,6 +370,16 @@ function validateEmailForRole(email, role, policyConfig = getEmailPolicyConfig()
     };
 }
 
+const newPasswordSchema = z.string({ required_error: "Password is required." })
+    .min(12, "Password must be at least 12 characters long.")
+    .max(128, "Password must be 128 characters or fewer.")
+    .refine((value) => value.trim().length > 0, {
+        message: "Password cannot contain only whitespace."
+    });
+const passwordConfirmationSchema = z.string({
+    required_error: "Confirm your password."
+}).max(128, "Confirmation must be 128 characters or fewer.");
+
 const registrationSchema = z.object({
     firstName: z.string({ required_error: "First name is required." })
         .trim()
@@ -387,12 +397,8 @@ const registrationSchema = z.object({
         .refine((value) => Boolean(parseEmailAddress(value)), {
             message: "Enter a valid email address."
         }),
-    password: z.string({ required_error: "Password is required." })
-        .min(12, "Password must be at least 12 characters long.")
-        .max(128, "Password must be 128 characters or fewer.")
-        .refine((value) => value.trim().length > 0, {
-            message: "Password cannot contain only whitespace."
-        }),
+    password: newPasswordSchema,
+    confirmPassword: passwordConfirmationSchema,
     phoneNumber: z.string()
         .trim()
         .max(30, "Phone number must be 30 characters or fewer.")
@@ -418,7 +424,10 @@ const registrationSchema = z.object({
         .max(50, "Year level must be 50 characters or fewer.")
         .optional()
         .nullable()
-}).strict();
+}).strict().refine(
+    (value) => value.password === value.confirmPassword,
+    { message: "Passwords do not match.", path: ["confirmPassword"] }
+);
 
 const loginSchema = z.object({
     email: z.string({ required_error: "Email address is required." })
@@ -457,12 +466,8 @@ const staffProvisionSchema = z.object({
         .refine((value) => Boolean(parseEmailAddress(value)), {
             message: "Enter a valid email address."
         }),
-    password: z.string({ required_error: "Password is required." })
-        .min(12, "Password must be at least 12 characters long.")
-        .max(128, "Password must be 128 characters or fewer.")
-        .refine((value) => value.trim().length > 0, {
-            message: "Password cannot contain only whitespace."
-        }),
+    password: newPasswordSchema,
+    confirmPassword: passwordConfirmationSchema,
     phoneNumber: z.string()
         .trim()
         .max(30, "Phone number must be 30 characters or fewer.")
@@ -478,7 +483,10 @@ const staffProvisionSchema = z.object({
     fundingUnitId: z.number().int().positive().optional(),
     barangayId: z.number().int().positive().optional(),
     schoolId: z.number().int().positive().optional()
-}).strict();
+}).strict().refine(
+    (value) => value.password === value.confirmPassword,
+    { message: "Passwords do not match.", path: ["confirmPassword"] }
+);
 
 const applicationSchema = z.object({
     programId: z.number().int().positive()
@@ -636,13 +644,12 @@ const staffInvitationRegisterSchema = z.object({
         .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
         .optional()
         .nullable(),
-    password: z.string({ required_error: "Password is required." })
-        .min(12, "Password must be at least 12 characters long.")
-        .max(128, "Password must be 128 characters or fewer.")
-        .refine((value) => value.trim().length > 0, {
-            message: "Password cannot contain only whitespace."
-        })
-}).strict();
+    password: newPasswordSchema,
+    confirmPassword: passwordConfirmationSchema
+}).strict().refine(
+    (value) => value.password === value.confirmPassword,
+    { message: "Passwords do not match.", path: ["confirmPassword"] }
+);
 
 const schoolDomainCreateSchema = z.object({
     schoolId: z.number().int().positive().optional().nullable(),
@@ -1750,13 +1757,41 @@ function createApp({
             });
         }
 
+        const capabilities = await getSchemaCapabilities(pool);
+        const staffAuthJoin = capabilities.hasStaffAuthorizations
+            ? `LEFT JOIN LATERAL (
+                   SELECT sa.status, sa.role_name
+                   FROM "Staff_Email_Authorizations" sa
+                   WHERE lower(sa.email) = lower(u.email)
+                   ORDER BY sa.updated_at DESC, sa.authorization_id DESC
+                   LIMIT 1
+               ) staff_auth ON TRUE`
+            : "";
+        const staffAuthSelect = capabilities.hasStaffAuthorizations
+            ? ", staff_auth.status AS staff_auth_status, staff_auth.role_name AS staff_auth_role"
+            : "";
+        const emailVerifiedSelect = capabilities.hasUserEmailVerifiedAt
+            ? ", u.email_verified_at"
+            : ", NULL::timestamptz AS email_verified_at";
+        const verifiedSchoolDomainsJoin = capabilities.hasSchoolEmailDomains
+            ? `LEFT JOIN LATERAL (
+                   SELECT array_agg(school_domain.domain ORDER BY school_domain.is_primary DESC, school_domain.domain)
+                       AS verified_school_domains
+                   FROM "School_Email_Domains" school_domain
+                   WHERE school_domain.school_id = registrar.school_id
+                     AND school_domain.domain_status = 'verified'
+               ) verified_domains ON TRUE`
+            : "";
+        const verifiedSchoolDomainsSelect = capabilities.hasSchoolEmailDomains
+            ? ", verified_domains.verified_school_domains"
+            : "";
         const result = await pool.query(
             `SELECT u.user_id, u.first_name, u.last_name, u.email,
                     u.password_hash, u.is_active, r.role_name,
                     student.student_id,
                     admin.funding_unit_id,
                     coordinator.barangay_id AS coordinator_barangay_id,
-                    registrar.school_id AS registrar_school_id
+                    registrar.school_id AS registrar_school_id${emailVerifiedSelect}${staffAuthSelect}${verifiedSchoolDomainsSelect}
              FROM "Users" u
              JOIN "Roles" r ON r.role_id = u.role_id
              LEFT JOIN "Students" student
@@ -1770,6 +1805,8 @@ function createApp({
               AND (coordinator.term_end IS NULL OR coordinator.term_end >= CURRENT_DATE)
              LEFT JOIN "Registrars" registrar
                ON registrar.user_id = u.user_id AND registrar.is_active = TRUE
+             ${verifiedSchoolDomainsJoin}
+             ${staffAuthJoin}
              WHERE lower(u.email) = $1
              LIMIT 1`,
             [input.data.email]
@@ -1814,6 +1851,16 @@ function createApp({
         ) {
             return res.status(403).json({
                 message: "This staff account does not have an active developer authorization."
+            });
+        }
+        if (
+            capabilities.hasStaffAuthorizations &&
+            ["LGU Admin", "Barangay Coordinator", "Registrar"].includes(user.role_name) &&
+            user.staff_auth_status === "active" &&
+            user.staff_auth_role !== user.role_name
+        ) {
+            return res.status(403).json({
+                message: "This staff account does not have an active authorization."
             });
         }
 
@@ -1891,22 +1938,35 @@ function createApp({
             if (capabilities.hasUserEmailVerifiedAt) {
                 extraSelects.push("u.email_verified_at");
             }
+            if (capabilities.hasSchoolEmailDomains) {
+                extraSelects.push("verified_domains.verified_school_domains");
+            }
             if (capabilities.hasLguAdminPermissions) {
                 extraSelects.push("admin.permissions AS lgu_permissions");
             }
             if (capabilities.hasStaffAuthorizations) {
                 extraSelects.push("staff_auth.status AS staff_auth_status");
+                extraSelects.push("staff_auth.role_name AS staff_auth_role");
             }
             const extraSelectClause =
                 extraSelects.length > 0 ? `,\n                        ${extraSelects.join(",\n                        ")}` : "";
             const staffAuthJoin = capabilities.hasStaffAuthorizations
                 ? `\n                 LEFT JOIN LATERAL (
-                     SELECT sa.status
+                     SELECT sa.status, sa.role_name
                      FROM "Staff_Email_Authorizations" sa
                      WHERE lower(sa.email) = lower(u.email)
                      ORDER BY sa.updated_at DESC, sa.authorization_id DESC
                      LIMIT 1
                  ) staff_auth ON TRUE`
+                : "";
+            const verifiedSchoolDomainsJoin = capabilities.hasSchoolEmailDomains
+                ? `\n                 LEFT JOIN LATERAL (
+                     SELECT array_agg(school_domain.domain ORDER BY school_domain.is_primary DESC, school_domain.domain)
+                         AS verified_school_domains
+                     FROM "School_Email_Domains" school_domain
+                     WHERE school_domain.school_id = registrar.school_id
+                       AND school_domain.domain_status = 'verified'
+                 ) verified_domains ON TRUE`
                 : "";
             const result = await pool.query(
                 `SELECT u.user_id, u.first_name, u.last_name, u.email,
@@ -1928,7 +1988,7 @@ function createApp({
                   AND coordinator.term_start <= CURRENT_DATE
                   AND (coordinator.term_end IS NULL OR coordinator.term_end >= CURRENT_DATE)
                  LEFT JOIN "Registrars" registrar
-                   ON registrar.user_id = u.user_id AND registrar.is_active = TRUE${staffAuthJoin}
+                   ON registrar.user_id = u.user_id AND registrar.is_active = TRUE${verifiedSchoolDomainsJoin}${staffAuthJoin}
                  WHERE session.token_hash = $1
                    AND session.revoked_at IS NULL
                    AND session.expires_at > NOW()
@@ -1952,6 +2012,17 @@ function createApp({
                 clearSessionCookie(res, secureCookies);
                 return res.status(403).json({
                     message: "This staff authorization is no longer active."
+                });
+            }
+            if (
+                capabilities.hasStaffAuthorizations &&
+                ["LGU Admin", "Barangay Coordinator", "Registrar"].includes(row.role_name) &&
+                row.staff_auth_status === "active" &&
+                row.staff_auth_role !== row.role_name
+            ) {
+                clearSessionCookie(res, secureCookies);
+                return res.status(403).json({
+                    message: "This staff account does not have an active authorization."
                 });
             }
 

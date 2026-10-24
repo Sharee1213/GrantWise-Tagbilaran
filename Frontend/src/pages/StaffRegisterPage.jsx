@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import {
   AlertCircle,
   ArrowRight,
-  Check,
   CheckCircle2,
   Eye,
   EyeOff,
@@ -11,7 +10,9 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
+import PasswordGuidance from "../components/PasswordGuidance.jsx";
 import { apiRequest } from "../services/api.js";
+import { getNewPasswordError } from "../services/passwordPolicy.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PHONE_PATTERN = /^[0-9+()\-\s]{7,30}$/;
@@ -75,15 +76,8 @@ function validateStaffRegistrationForm(form) {
     errors.invitationToken = "Enter the complete invitation token.";
   }
 
-  if (!form.password) {
-    errors.password = "Password is required.";
-  } else if (form.password.trim().length === 0) {
-    errors.password = "Password cannot contain only whitespace.";
-  } else if (form.password.length < 12) {
-    errors.password = "Password must be at least 12 characters long.";
-  } else if (form.password.length > 128) {
-    errors.password = "Password must be 128 characters or fewer.";
-  }
+  const passwordError = getNewPasswordError(form.password);
+  if (passwordError) errors.password = passwordError;
 
   if (!form.confirmPassword) {
     errors.confirmPassword = "Confirm your password.";
@@ -256,6 +250,7 @@ export default function StaffRegisterPage() {
           invitationToken: form.invitationToken.trim(),
           phoneNumber: form.phoneNumber.trim() || null,
           password: form.password,
+          confirmPassword: form.confirmPassword,
         }),
       });
 
@@ -287,24 +282,6 @@ export default function StaffRegisterPage() {
       setLoading(false);
     }
   }
-
-  const passwordChecks = [
-    {
-      id: "length",
-      label: "At least 12 characters (required)",
-      passed: form.password.length >= 12,
-    },
-    {
-      id: "case",
-      label: "Uppercase and lowercase letters",
-      passed: /[a-z]/.test(form.password) && /[A-Z]/.test(form.password),
-    },
-    {
-      id: "number",
-      label: "At least one number or symbol",
-      passed: /[0-9]|[^A-Za-z0-9]/.test(form.password),
-    },
-  ];
 
   return (
     <div className="page-container information-page narrow-page">
@@ -561,19 +538,7 @@ export default function StaffRegisterPage() {
             </p>
           )}
 
-          <ul className="password-checklist" aria-label="Password requirements">
-            {passwordChecks.map((check) => (
-              <li
-                key={check.id}
-                className={check.passed ? "password-check-passed" : ""}
-              >
-                <span className="password-check-dot" aria-hidden="true">
-                  {check.passed ? <Check size={12} /> : null}
-                </span>
-                {check.label}
-              </li>
-            ))}
-          </ul>
+          <PasswordGuidance password={form.password} />
 
           <button
             className="button button-primary auth-submit-btn"

@@ -156,7 +156,8 @@ class FakePool {
                     has_admin_funding_unit_assignment: relationalSchema,
                     has_program_budget_balances: relationalSchema,
                     has_award_approval_function: relationalSchema,
-                    has_staff_admin_workflow: relationalSchema
+                    has_staff_admin_workflow: relationalSchema,
+                    has_staff_authorizations: this.hasStaffAuthorizations === true
                 }]
             };
         }
@@ -344,13 +345,15 @@ class FakePool {
                         first_name: user.first_name,
                         last_name: user.last_name,
                         email: user.email,
-                        password_hash: loginPasswordHash,
+                        password_hash: this.loginPasswordHash || loginPasswordHash,
                         is_active: user.is_active !== false,
                         role_name: user.role_name,
                         student_id: user.student_id,
                         funding_unit_id: user.funding_unit_id,
                         coordinator_barangay_id: user.coordinator_barangay_id,
-                        registrar_school_id: user.registrar_school_id
+                        registrar_school_id: user.registrar_school_id,
+                        staff_auth_status: this.staffAuthStatus,
+                        staff_auth_role: this.staffAuthRole || user.role_name
                     }]
                     : []
             };
@@ -381,7 +384,13 @@ class FakePool {
             ) {
                 return {
                     rowCount: user && !sessionInvalid ? 1 : 0,
-                    rows: user && !sessionInvalid ? [user] : []
+                    rows: user && !sessionInvalid
+                        ? [{
+                            ...user,
+                            staff_auth_status: this.staffAuthStatus,
+                            staff_auth_role: this.staffAuthRole || user.role_name
+                        }]
+                        : []
                 };
             }
             return { rowCount: user ? 1 : 0, rows: user ? [user] : [] };
@@ -1472,6 +1481,102 @@ test("login rejects invalid credentials with the same generic response", async (
     }
 });
 
+test("login preserves verification of existing shorter Argon2id passwords", async () => {
+    const legacyPool = new FakePool();
+    legacyPool.loginPasswordHash = await argon2.hash("legacy");
+    const legacyApp = createApp({
+        pool: legacyPool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGINS: FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    const response = await request(legacyApp)
+        .post("/api/auth/login")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({ email: "one@gmail.com", password: "legacy" });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.user.role, "Scholar");
+});
+
+test("login requires an active staff authorization matching the assigned role", async () => {
+    const staffPool = new FakePool();
+    staffPool.hasStaffAuthorizations = true;
+    staffPool.staffAuthStatus = null;
+    staffPool.staffAuthRole = "Barangay Coordinator";
+    const staffApp = createApp({
+        pool: staffPool,
+        env: { NODE_ENV: "test", FRONTEND_ORIGINS: FRONTEND_ORIGIN },
+        logger: { error() {} }
+    });
+
+    for (const authorization of [
+        { status: "pending", role: "Barangay Coordinator" },
+        { status: "revoked", role: "Barangay Coordinator" },
+        { status: "active", role: "Registrar" }
+    ]) {
+        staffPool.staffAuthStatus = authorization.status;
+        staffPool.staffAuthRole = authorization.role;
+        const response = await request(staffApp)
+            .post("/api/auth/login")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                email: "coordinator@gmail.com",
+                password: "correct horse battery staple"
+            });
+
+        assert.equal(response.status, 403);
+        assert.equal(response.headers["set-cookie"], undefined);
+    }
+
+    staffPool.staffAuthStatus = null;
+    staffPool.staffAuthRole = "Barangay Coordinator";
+    const legacyLogin = await request(staffApp)
+        .post("/api/auth/login")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            email: "coordinator@gmail.com",
+            password: "correct horse battery staple"
+        });
+    assert.equal(legacyLogin.status, 200);
+    const legacyCookie = legacyLogin.headers["set-cookie"]
+        .find((value) => value.startsWith(`${SESSION_COOKIE}=`))
+        .split(";")[0];
+    const legacySession = await request(staffApp)
+        .get("/api/auth/me")
+        .set("Cookie", legacyCookie);
+    assert.equal(legacySession.status, 200);
+    await request(staffApp)
+        .post("/api/auth/logout")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", legacyCookie);
+
+    staffPool.staffAuthStatus = "active";
+    staffPool.staffAuthRole = "Barangay Coordinator";
+    const login = await request(staffApp)
+        .post("/api/auth/login")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            email: "coordinator@gmail.com",
+            password: "correct horse battery staple"
+        });
+    assert.equal(login.status, 200);
+
+    const cookie = login.headers["set-cookie"]
+        .find((value) => value.startsWith(`${SESSION_COOKIE}=`))
+        .split(";")[0];
+    const session = await request(staffApp)
+        .get("/api/auth/me")
+        .set("Cookie", cookie);
+    assert.equal(session.status, 200);
+    assert.equal(session.body.user.role, "Barangay Coordinator");
+    const logout = await request(staffApp)
+        .post("/api/auth/logout")
+        .set("Origin", FRONTEND_ORIGIN)
+        .set("Cookie", cookie);
+    assert.equal(logout.status, 200);
+});
+
 test("login and registration reject invalid input before database writes", async () => {
     const writesBefore = fakePool.registrationWriteCount || 0;
     const invalidLogin = await request(app)
@@ -1480,20 +1585,47 @@ test("login and registration reject invalid input before database writes", async
         .send({ email: "not-an-email", password: "" });
     assert.equal(invalidLogin.status, 400);
 
-    const invalidRegistration = await request(app)
+    for (const password of [
+        "short",
+        " ".repeat(12),
+        "x".repeat(129)
+    ]) {
+        const invalidRegistration = await request(app)
+            .post("/api/auth/register")
+            .set("Origin", FRONTEND_ORIGIN)
+            .send({
+                firstName: "",
+                lastName: "Student",
+                email: "not-an-email",
+                password,
+                barangayId: -1,
+                schoolId: 0,
+                studentNumber: "",
+                course: ""
+            });
+        assert.equal(invalidRegistration.status, 400);
+    }
+    assert.equal(fakePool.registrationWriteCount || 0, writesBefore);
+
+    const mismatchedConfirmation = await request(app)
         .post("/api/auth/register")
         .set("Origin", FRONTEND_ORIGIN)
         .send({
-            firstName: "",
+            firstName: "New",
             lastName: "Student",
-            email: "not-an-email",
-            password: "short",
-            barangayId: -1,
-            schoolId: 0,
-            studentNumber: "",
-            course: ""
+            email: "new.student@gmail.com",
+            password: "a sufficiently long password",
+            confirmPassword: "a different long password",
+            barangayId: 1,
+            schoolId: 1,
+            studentNumber: "NEW-1",
+            course: "Education"
         });
-    assert.equal(invalidRegistration.status, 400);
+    assert.equal(mismatchedConfirmation.status, 400);
+    assert.equal(
+        mismatchedConfirmation.body.errors.some(({ field }) => field === "confirmPassword"),
+        true
+    );
     assert.equal(fakePool.registrationWriteCount || 0, writesBefore);
 });
 
@@ -1515,6 +1647,7 @@ test("registration rejects client-selected roles and privilege escalation fields
                 lastName: "Student",
                 email: "new.student@gmail.com",
                 password: "a sufficiently long password",
+                confirmPassword: "a sufficiently long password",
                 barangayId: 1,
                 schoolId: 1,
                 studentNumber: "NEW-1",
@@ -1536,6 +1669,7 @@ test("registration hashes the password, normalizes email, and assigns only the S
             lastName: "Student",
             email: "  New.Student@Gmail.COM  ",
             password,
+            confirmPassword: password,
             barangayId: 1,
             schoolId: 1,
             studentNumber: "NEW-1",
@@ -1567,6 +1701,7 @@ test("student registration accepts school-issued email accounts and never grants
             lastName: "Santos",
             email: "registrar.admin@hnu.edu.ph",
             password,
+            confirmPassword: password,
             barangayId: 1,
             schoolId: 1,
             studentNumber: "HNU-2026-01",
@@ -1602,6 +1737,7 @@ test("student registration rejects non-Gmail consumer domains, arbitrary domains
                 lastName: "Email",
                 email: invalidEmail,
                 password: "a sufficiently long password",
+                confirmPassword: "a sufficiently long password",
                 barangayId: 1,
                 schoolId: 1,
                 studentNumber: "INV-1",
@@ -1637,6 +1773,7 @@ test("registration reports duplicate account details case-insensitively without 
             lastName: "Student",
             email: "  EXISTING.STUDENT@GMAIL.COM ",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             barangayId: 1,
             schoolId: 1,
             studentNumber: "EXISTING-1",
@@ -1648,7 +1785,45 @@ test("registration reports duplicate account details case-insensitively without 
     assert.equal(duplicatePool.registrationWriteCount || 0, 0);
 });
 
-test("shared login authenticates all four roles and returns backend-verified role, scopeId, and dashboard redirect path", async () => {
+test("login and restored sessions use verified school-domain records", async () => {
+    const pool = new StaffAuthStatefulPool();
+    pool.schoolDomains.push({
+        domain_id: 9,
+        school_id: 1,
+        domain: "custom-hnu.edu.ph",
+        domain_status: "verified",
+        is_primary: false
+    });
+    pool.seedUser({
+        email: "registrar@custom-hnu.edu.ph",
+        roleName: "Registrar",
+        schoolId: 1,
+        staffAuthStatus: "active"
+    });
+    const testApp = createStatefulTestApp(pool);
+
+    const login = await request(testApp)
+        .post("/api/auth/login")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            email: "registrar@custom-hnu.edu.ph",
+            password: "correct horse battery staple"
+        });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.emailVerification.verified, true);
+
+    const cookie = login.headers["set-cookie"]
+        .find((value) => value.startsWith(`${SESSION_COOKIE}=`))
+        .split(";")[0];
+    const session = await request(testApp)
+        .get("/api/auth/me")
+        .set("Cookie", cookie);
+    assert.equal(session.status, 200);
+    assert.equal(session.body.user.role, "Registrar");
+    assert.equal(session.body.emailVerification.verified, true);
+});
+
+test("shared login authenticates every supported role and returns backend-verified dashboard scope", async () => {
     const roleExpectations = [
         {
             email: "  ONE@GMAIL.COM ",
@@ -1681,6 +1856,14 @@ test("shared login authenticates all four roles and returns backend-verified rol
             expectedScopeId: 41,
             expectedScopeType: "funding_unit",
             expectedDashboardPath: "/portal/lgu-admin"
+        },
+        {
+            email: "cuevas.sharee_angela@hnu.edu.ph",
+            expectedEmail: "cuevas.sharee_angela@hnu.edu.ph",
+            expectedRole: "System Admin",
+            expectedScopeId: 66,
+            expectedScopeType: "system",
+            expectedDashboardPath: "/portal/system-admin"
         }
     ];
 
@@ -1760,6 +1943,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "One",
             email: "registrar2@hnu.edu.ph",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             schoolId: 1
         });
     assert.equal(unauth.status, 401);
@@ -1776,6 +1960,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
                 lastName: "One",
                 email: "registrar2@hnu.edu.ph",
                 password: "a sufficiently long password",
+                confirmPassword: "a sufficiently long password",
                 schoolId: 1
             });
         assert.equal(forbidden.status, 403);
@@ -1792,6 +1977,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Gmail",
             email: "lgu.admin@gmail.com",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             fundingUnitId: 41
         });
     assert.equal(gmailAdmin.status, 400);
@@ -1807,6 +1993,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Unconfirmed",
             email: "officer@unconfirmed-lgu.org",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             fundingUnitId: 41
         });
     assert.equal(unconfirmedLguDomain.status, 503);
@@ -1823,6 +2010,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Coord",
             email: "coord@yahoo.com",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             barangayId: 1
         });
     assert.equal(invalidCoordYahoo.status, 400);
@@ -1837,6 +2025,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Coord",
             email: "  Brgy.Coord@GMAIL.COM ",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             barangayId: 1
         });
     assert.equal(validCoordGmail.status, 201);
@@ -1856,6 +2045,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Reg",
             email: "registrar@tagbilaran.gov.ph",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             schoolId: 1
         });
     assert.equal(invalidRegistrarGov.status, 400);
@@ -1870,6 +2060,7 @@ test("privileged staff provisioning requires LGU Admin authentication and enforc
             lastName: "Reg",
             email: "Records.Office@HNU.EDU.PH",
             password: "a sufficiently long password",
+            confirmPassword: "a sufficiently long password",
             schoolId: 1
         });
     assert.equal(validRegistrarSchool.status, 201);
@@ -2201,6 +2392,7 @@ class StaffAuthStatefulPool {
             coordinator_barangay_id: coordinator?.is_current ? coordinator.barangay_id : undefined,
             registrar_school_id: registrar?.is_active ? registrar.school_id : undefined,
             staff_auth_status: staffAuth ? staffAuth.status : null,
+            staff_auth_role: staffAuth ? staffAuth.role_name : null,
             verified_school_domains: verifiedSchoolDomains && verifiedSchoolDomains.length > 0 ? verifiedSchoolDomains : null
         };
     }
@@ -2789,6 +2981,7 @@ test("1. Proposed developer email cannot gain developer access or register throu
                 lastName: "Cuevas",
                 email: devEmail,
                 password: "StrongPassword#2026",
+                confirmPassword: "StrongPassword#2026",
                 barangayId: 13,
                 schoolId: 1,
                 studentNumber: "2026-DEV-01",
@@ -2955,6 +3148,19 @@ test("6. Invited staff email (shareerizal@admin.com) can register, verify email 
     assert.equal(inspectRes.body.invitation.role, "LGU Admin");
     assert.equal(inspectRes.body.invitation.scopeId, 41);
 
+    const mismatchedConfirmation = await request(testApp)
+        .post("/api/auth/staff-register")
+        .set("Origin", FRONTEND_ORIGIN)
+        .send({
+            email: "shareerizal@admin.com",
+            invitationToken,
+            firstName: "Sharee",
+            lastName: "Rizal",
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "DifferentStaffPassword#2026"
+        });
+    assert.equal(mismatchedConfirmation.status, 400);
+
     const registerRes = await request(testApp)
         .post("/api/auth/staff-register")
         .set("Origin", FRONTEND_ORIGIN)
@@ -2963,7 +3169,8 @@ test("6. Invited staff email (shareerizal@admin.com) can register, verify email 
             invitationToken,
             firstName: "Sharee",
             lastName: "Rizal",
-            password: "SecureStaffPassword#2026"
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026"
         });
     assert.equal(registerRes.status, 201);
     assert.equal(registerRes.body.staffAccount.email, "shareerizal@admin.com");
@@ -2984,7 +3191,8 @@ test("7. Uninvited email (joserizal@admin.com) cannot register as LGU Admin or a
             invitationToken: "0123456789abcdef0123456789abcdef0123456789abcdef",
             firstName: "Jose",
             lastName: "Rizal",
-            password: "SecureStaffPassword#2026"
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026"
         });
     assert.equal(uninvitedReg.status, 403);
     assert.match(uninvitedReg.body.message, /not authorized on the staff allowlist/i);
@@ -3033,7 +3241,8 @@ test("8. Expired invitation cannot be redeemed", async () => {
             invitationToken: inviteRes.body.invitationToken,
             firstName: "Expired",
             lastName: "Staff",
-            password: "SecureStaffPassword#2026"
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026"
         });
     assert.equal(redeemRes.status, 403);
     assert.match(redeemRes.body.message, /expired/i);
@@ -3066,7 +3275,8 @@ test("9. Revoked invitation cannot be redeemed and revoking an active authorizat
             invitationToken: inviteRes.body.invitationToken,
             firstName: "Revocable",
             lastName: "Admin",
-            password: "SecureStaffPassword#2026"
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026"
         });
     assert.equal(regRes.status, 201);
 
@@ -3429,6 +3639,7 @@ test("21. Student registering with a valid school email receives verification to
             lastName: "Santos",
             email: "maria.santos@hnu.edu.ph",
             password: "StudentStrongPassword#2026",
+            confirmPassword: "StudentStrongPassword#2026",
             barangayId: 13,
             schoolId: 1,
             studentNumber: "HNU-2026-101",
@@ -3469,6 +3680,7 @@ test("22. Student registering with a mismatched school domain (e.g. @bisu.edu.ph
             lastName: "Penduko",
             email: "pedro@bisu.edu.ph",
             password: "StudentStrongPassword#2026",
+            confirmPassword: "StudentStrongPassword#2026",
             barangayId: 1,
             schoolId: 1, // HNU selected, but email is @bisu.edu.ph
             studentNumber: "HNU-2026-999",
@@ -3490,6 +3702,7 @@ test("23. Lookalike domain (student@fakehnu.edu.ph) is rejected", async () => {
             lastName: "Domain",
             email: "student@fakehnu.edu.ph",
             password: "StudentStrongPassword#2026",
+            confirmPassword: "StudentStrongPassword#2026",
             barangayId: 1,
             schoolId: 1,
             studentNumber: "HNU-FAKE-001",
@@ -3614,6 +3827,7 @@ test("27. Existing student registration and application flow continue working", 
             lastName: "Scholar",
             email: "continuing.scholar@gmail.com",
             password: "ValidStudentPassword#123",
+            confirmPassword: "ValidStudentPassword#123",
             barangayId: 1,
             schoolId: 1,
             studentNumber: "2026-CONT-01",
@@ -3671,6 +3885,7 @@ test("29. Client-supplied role or scope manipulation fails", async () => {
             lastName: "User",
             email: "attacker@gmail.com",
             password: "ValidStudentPassword#123",
+            confirmPassword: "ValidStudentPassword#123",
             barangayId: 1,
             schoolId: 1,
             studentNumber: "ATK-001",
@@ -3699,6 +3914,7 @@ test("29. Client-supplied role or scope manipulation fails", async () => {
             firstName: "Scoped",
             lastName: "Registrar",
             password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026",
             role: "System Admin",
             schoolId: 2
         });
@@ -3733,7 +3949,8 @@ test("30. Audit log entries are created for staff authorization creation, invita
             invitationToken: createRes.body.invitationToken,
             firstName: "Audited",
             lastName: "Staff",
-            password: "SecureStaffPassword#2026"
+            password: "SecureStaffPassword#2026",
+            confirmPassword: "SecureStaffPassword#2026"
         });
     assert.equal(redeemRes.status, 201);
 

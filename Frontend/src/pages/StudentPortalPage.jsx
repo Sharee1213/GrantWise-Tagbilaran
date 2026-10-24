@@ -75,7 +75,7 @@ export default function StudentPortalPage() {
       const [programData, applicationData, profileData] = await Promise.all([
         apiRequest("programs"),
         apiRequest("student/applications"),
-        apiRequest("student/profile").catch(() => ({ profile: null })),
+        apiRequest("student/profile"),
       ]);
 
       setCurrentUser(user);
@@ -107,7 +107,10 @@ export default function StudentPortalPage() {
     try {
       const data = await apiRequest("student/applications");
       setApplications(data.applications || []);
-    } catch {}
+      setError("");
+    } catch (requestError) {
+      setError(requestError.message || "Could not refresh your applications.");
+    }
   }
 
   async function handleRequestVerificationToken() {

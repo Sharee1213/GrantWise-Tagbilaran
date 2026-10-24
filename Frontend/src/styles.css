@@ -1821,6 +1821,69 @@ html.dark .hero {
   color: var(--badge-danger-text);
 }
 
+.password-guidance {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.password-strength {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--secondary-text);
+  font-size: 12px;
+}
+
+.password-strength-track {
+  display: block;
+  width: 88px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--hover-bg);
+}
+
+.password-strength-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary-interactive);
+  transition: width 160ms ease;
+}
+
+.password-checklist {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--secondary-text);
+  font-size: 12px;
+}
+
+.password-checklist li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.password-checklist .password-check-passed {
+  color: var(--primary-interactive);
+}
+
+.password-check-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--secondary-text);
+}
+
+.password-check-passed .password-check-dot {
+  background: var(--primary-interactive);
+}
+
 .auth-form-footer {
   margin-top: 20px;
   padding-top: 18px;

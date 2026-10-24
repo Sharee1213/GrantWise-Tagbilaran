@@ -190,6 +190,18 @@ async function completeDeveloperBootstrap({
             throw error;
         }
 
+        const existingUser = await client.query(
+            `SELECT user_id FROM "Users" WHERE LOWER(BTRIM(email)) = $1 LIMIT 1`,
+            [normalizedEmail]
+        );
+        if (existingUser.rowCount > 0) {
+            const error = new Error(
+                "An account already exists for this developer email. Use the approved account-provisioning process; bootstrap will not change existing accounts."
+            );
+            error.code = "DEVELOPER_ACCOUNT_ALREADY_EXISTS";
+            throw error;
+        }
+
         await client.query(
             `UPDATE "Email_Verification_Tokens"
              SET consumed_at = NOW()
@@ -210,15 +222,6 @@ async function completeDeveloperBootstrap({
                 role_id, first_name, last_name, email, password_hash,
                 phone_number, email_verified_at, is_active
              ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), TRUE)
-             ON CONFLICT (email) DO UPDATE
-             SET role_id = EXCLUDED.role_id,
-                 first_name = EXCLUDED.first_name,
-                 last_name = EXCLUDED.last_name,
-                 password_hash = EXCLUDED.password_hash,
-                 phone_number = COALESCE(EXCLUDED.phone_number, "Users".phone_number),
-                 email_verified_at = NOW(),
-                 is_active = TRUE,
-                 updated_at = NOW()
              RETURNING user_id, email`,
             [
                 systemAdminRoleId,

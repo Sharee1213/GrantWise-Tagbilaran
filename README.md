@@ -81,6 +81,13 @@ production: the project does not yet provide email verification or student
 identity proof. Staff account provisioning is also not public. Existing
 accounts must have Argon2id-compatible hashes or be migrated through a secure
 credential reset/provisioning process before login.
+New student and invited-staff passwords must be 12–128 characters and cannot
+consist entirely of whitespace; spaces and symbols are accepted without
+requiring a character mix. Registration requires the confirmation password to
+match exactly on both client and server. The browser displays a local,
+length-based strength estimate. Login preserves compatibility with existing
+Argon2id passwords shorter than the new-password minimum. Developer bootstrap refuses to replace
+an existing account or change its password, role, or active state.
 Unsafe API requests require an allowed Origin and the API uses credentialed
 CORS configured for the frontend origin.
 
