@@ -28,7 +28,20 @@ const {
   PROPOSED_SCHOOL_REGISTRAR_DIRECTORY,
   DEFAULT_SCHOOL_DOMAIN_BY_ID,
 } = require("./staff-directory-config");
-const { getAllowedDeveloperEmails } = require("./scripts/bootstrap-developer");
+const {
+  SYSTEM_ADMIN_EMAILS,
+  getStaffAccount,
+  isWhitelistedStaff,
+} = require("./staff-accounts");
+
+// Staff roles that may only be used by the whitelisted accounts in
+// staff-accounts.js.
+const STAFF_ROLES = new Set([
+  "System Admin",
+  "LGU Admin",
+  "Barangay Coordinator",
+  "Registrar",
+]);
 
 const SESSION_COOKIE = "grantwise_session";
 const SESSION_DURATION_MS = 12 * 60 * 60 * 1000;
@@ -151,7 +164,8 @@ function getEmailPolicyConfig(env = process.env) {
   const barangayDomains = parseConfiguredDomainSet(
     env.ALLOWED_BARANGAY_EMAIL_DOMAINS || env.BARANGAY_EMAIL_DOMAINS,
   );
-  const developerAllowlist = new Set(getAllowedDeveloperEmails(env));
+  // Only the whitelisted System Admin accounts (staff-accounts.js).
+  const developerAllowlist = new Set(SYSTEM_ADMIN_EMAILS);
   const strictSchoolDomainAllowlist =
     env.STRICT_SCHOOL_DOMAIN_ALLOWLIST === "true";
   const requireStudentSchoolEmail = env.REQUIRE_STUDENT_SCHOOL_EMAIL === "true";
@@ -269,6 +283,18 @@ function validateEmailForRole(
   }
 
   const { domain, normalized } = parsed;
+
+  // Staff roles: the exact email must be whitelisted for exactly this role.
+  // This runs first, so no other exception or domain rule can admit staff.
+  if (STAFF_ROLES.has(role)) {
+    if (isWhitelistedStaff(normalized, role)) {
+      return { valid: true, normalizedEmail: normalized, domain };
+    }
+    return {
+      valid: false,
+      message: "This email address is not an authorized staff account.",
+    };
+  }
 
   if (
     options.allowExactRoleEmailLoginException === true &&
@@ -1171,6 +1197,25 @@ function createApp({
     });
   }
 
+  // Staff accounts are fixed (staff-accounts.js). Every route that could
+  // create, invite, or re-authorize staff is closed.
+  const denyStaffProvisioning = (req, res) =>
+    res.status(403).json({
+      message:
+        "Staff accounts are fixed and cannot be created, invited, or changed here.",
+    });
+  app.use(
+    [
+      "/api/auth/staff-register",
+      "/api/auth/staff-invitations",
+      "/api/admin/staff-accounts",
+    ],
+    denyStaffProvisioning,
+  );
+  app.use("/api/system-admin/staff-authorizations", (req, res, next) =>
+    req.method === "GET" ? next() : denyStaffProvisioning(req, res),
+  );
+
   if (allowRegistration) {
     app.post("/api/auth/register", authRateLimit, async (req, res) => {
       const input = registrationSchema.safeParse(req.body);
@@ -1183,6 +1228,11 @@ function createApp({
       }
 
       const data = input.data;
+      if (getStaffAccount(data.email)) {
+        return res.status(403).json({
+          message: "This email address is reserved for a staff account.",
+        });
+      }
       if (emailPolicyConfig.developerAllowlist.has(data.email)) {
         return res.status(403).json({
           message:
@@ -2003,7 +2053,13 @@ function createApp({
       });
     }
 
-    if (!user || !user.is_active || !validPassword) {
+    // Staff accounts must be on the whitelist for their stored role.
+    const staffNotWhitelisted =
+      user &&
+      user.role_name !== "Scholar" &&
+      !isWhitelistedStaff(user.email, user.role_name);
+
+    if (!user || !user.is_active || !validPassword || staffNotWhitelisted) {
       return res.status(401).json({ message: "Email or password is invalid." });
     }
 
@@ -2190,6 +2246,15 @@ function createApp({
       const row = result.rows[0];
 
       if (!row) {
+        clearSessionCookie(res, SESSION_COOKIE, secureCookies);
+        return res.status(401).json({ message: "Authentication is required." });
+      }
+
+      // A session for a non-whitelisted staff account is never valid.
+      if (
+        row.role_name !== "Scholar" &&
+        !isWhitelistedStaff(row.email, row.role_name)
+      ) {
         clearSessionCookie(res, SESSION_COOKIE, secureCookies);
         return res.status(401).json({ message: "Authentication is required." });
       }
