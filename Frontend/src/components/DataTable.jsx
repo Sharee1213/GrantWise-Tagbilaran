@@ -97,6 +97,12 @@ export default function DataTable({
         {filterComponent && <div className="data-table-filters">{filterComponent}</div>}
       </div>
 
+      <p className="sr-only" role="status" aria-live="polite">
+        {loading
+          ? "Loading records"
+          : `${sortedData.length} ${sortedData.length === 1 ? "record" : "records"} found`}
+      </p>
+
       {loading ? (
         <LoadingSkeleton type="table" lines={5} />
       ) : sortedData.length === 0 ? (
@@ -109,30 +115,48 @@ export default function DataTable({
                 <tr>
                   {columns.map((col) => {
                     const isSorted = sortField === col.accessor;
+                    const ariaSort = col.sortable
+                      ? isSorted
+                        ? sortAsc
+                          ? "ascending"
+                          : "descending"
+                        : "none"
+                      : undefined;
+                    const sortIcon = col.sortable ? (
+                      <span className="th-sort-icon">
+                        {isSorted ? (
+                          sortAsc ? (
+                            <ArrowUp size={13} aria-hidden="true" />
+                          ) : (
+                            <ArrowDown size={13} aria-hidden="true" />
+                          )
+                        ) : (
+                          <ArrowUpDown size={13} className="text-muted opacity-40" aria-hidden="true" />
+                        )}
+                      </span>
+                    ) : null;
                     return (
                       <th
                         key={col.header}
                         scope="col"
+                        aria-sort={ariaSort}
                         className={`${col.className || ""} ${col.sortable ? "is-sortable" : ""}`}
-                        onClick={col.sortable ? () => handleSort(col.accessor) : undefined}
                         style={col.width ? { width: col.width } : undefined}
                       >
-                        <div className="th-content">
-                          <span>{col.header}</span>
-                          {col.sortable && (
-                            <span className="th-sort-icon">
-                              {isSorted ? (
-                                sortAsc ? (
-                                  <ArrowUp size={13} aria-hidden="true" />
-                                ) : (
-                                  <ArrowDown size={13} aria-hidden="true" />
-                                )
-                              ) : (
-                                <ArrowUpDown size={13} className="text-muted opacity-40" aria-hidden="true" />
-                              )}
-                            </span>
-                          )}
-                        </div>
+                        {col.sortable ? (
+                          <button
+                            type="button"
+                            className="th-sort-button"
+                            onClick={() => handleSort(col.accessor)}
+                          >
+                            <span>{col.header}</span>
+                            {sortIcon}
+                          </button>
+                        ) : (
+                          <div className="th-content">
+                            <span>{col.header}</span>
+                          </div>
+                        )}
                       </th>
                     );
                   })}
