@@ -1,4 +1,4 @@
-import React from "react";
+import React, { lazy } from "react";
 import { Route, Routes } from "react-router-dom";
 import AppLayout from "./components/AppLayout.jsx";
 import {
@@ -6,18 +6,20 @@ import {
   PublicOnlyRoute,
 } from "./components/ProtectedRoute.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
-import ApplicationGuidePage from "./pages/ApplicationGuidePage.jsx";
 import HomePage from "./pages/HomePage.jsx";
-import LoginPage from "./pages/LoginPage.jsx";
-import SignUpPage from "./pages/SignUpPage.jsx";
-import StatusPage from "./pages/StatusPage.jsx";
-import ProgramsPage from "./pages/ProgramsPage.jsx";
-import PortalDirectoryPage from "./pages/PortalDirectoryPage.jsx";
-import StaffAccessManagementPage from "./pages/StaffAccessManagementPage.jsx";
-import StaffPortalPage from "./pages/StaffPortalPage.jsx";
-import StaffRegisterPage from "./pages/StaffRegisterPage.jsx";
-import StudentPortalPage from "./pages/StudentPortalPage.jsx";
-import NotFoundPage from "./pages/NotFoundPage.jsx";
+
+// Route-level code splitting: only the home page ships in the initial bundle.
+const ApplicationGuidePage = lazy(() => import("./pages/ApplicationGuidePage.jsx"));
+const LoginPage = lazy(() => import("./pages/LoginPage.jsx"));
+const SignUpPage = lazy(() => import("./pages/SignUpPage.jsx"));
+const StatusPage = lazy(() => import("./pages/StatusPage.jsx"));
+const ProgramsPage = lazy(() => import("./pages/ProgramsPage.jsx"));
+const PortalDirectoryPage = lazy(() => import("./pages/PortalDirectoryPage.jsx"));
+const StaffAccessManagementPage = lazy(() => import("./pages/StaffAccessManagementPage.jsx"));
+const StaffPortalPage = lazy(() => import("./pages/StaffPortalPage.jsx"));
+const StaffRegisterPage = lazy(() => import("./pages/StaffRegisterPage.jsx"));
+const StudentPortalPage = lazy(() => import("./pages/StudentPortalPage.jsx"));
+const NotFoundPage = lazy(() => import("./pages/NotFoundPage.jsx"));
 
 export default function App() {
   return (
