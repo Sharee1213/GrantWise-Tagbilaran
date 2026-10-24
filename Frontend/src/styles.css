@@ -1059,9 +1059,28 @@ textarea:focus {
   letter-spacing: 0.02em;
 }
 
+
 .data-table th.is-sortable {
   cursor: pointer;
   user-select: none;
+}
+
+.th-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.th-sort-button:hover {
+  color: var(--main-text);
 }
 
 .th-content {
