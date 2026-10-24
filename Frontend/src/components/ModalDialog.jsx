@@ -1,5 +1,14 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 export default function ModalDialog({
   isOpen,
@@ -11,22 +20,65 @@ export default function ModalDialog({
   className = "",
 }) {
   const modalRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const titleId = useId();
+
+  // Keep the latest onClose without re-running the focus effect on every render.
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const previouslyFocused = document.activeElement;
+    const dialog = modalRef.current;
+
+    // Move focus into the dialog (first focusable control, else the dialog itself).
+    const focusables = dialog ? dialog.querySelectorAll(FOCUSABLE_SELECTOR) : [];
+    const firstContentControl = Array.from(focusables).find(
+      (el) => !el.classList.contains("modal-close-btn"),
+    );
+    (firstContentControl || focusables[0] || dialog)?.focus();
+
     function handleKeyDown(e) {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
+      if (e.key === "Escape") {
+        onCloseRef.current?.();
+        return;
+      }
+      if (e.key !== "Tab" || !dialog) return;
+
+      const items = Array.from(dialog.querySelectorAll(FOCUSABLE_SELECTOR));
+      if (items.length === 0) {
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (!dialog.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
       }
     }
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-      document.addEventListener("keydown", handleKeyDown);
-    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+
     return () => {
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
+      // Return focus to whatever opened the dialog.
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -42,12 +94,13 @@ export default function ModalDialog({
         className={`modal-dialog ${maxWidth} ${className}`}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-dialog-title"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         ref={modalRef}
       >
         <div className="modal-header">
           <div>
-            <h2 id="modal-dialog-title" className="modal-title">
+            <h2 id={titleId} className="modal-title">
               {title}
             </h2>
             {subtitle && <p className="modal-subtitle">{subtitle}</p>}
