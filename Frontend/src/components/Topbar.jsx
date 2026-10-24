@@ -1,17 +1,16 @@
-import React, { useState } from "react";
-import {
-  ArrowRight,
-  ChevronDown,
-  Landmark,
-  LogOut,
-  Menu,
-  Shield,
-  User,
-  UserRound,
-} from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { ArrowRight, Landmark, LogOut, Menu, UserRound, X } from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle.jsx";
-import { getPortalPathForRole } from "../pages/LoginPage.jsx";
+import { getPortalPathForRole } from "../services/portalPaths.js";
+
+const PUBLIC_NAV_LINKS = [
+  { to: "/", label: "Home", end: true },
+  { to: "/programs", label: "Programs" },
+  { to: "/application-guide", label: "How to Apply" },
+  { to: "/portals", label: "Portals" },
+  { to: "/status", label: "System Status" },
+];
 
 export default function Topbar({
   user,
@@ -21,15 +20,30 @@ export default function Topbar({
   signingOut = false,
   isPortalView = false,
 }) {
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const location = useLocation();
+
+  // Close the public mobile menu whenever the route changes.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  // Allow Escape to dismiss the public mobile menu.
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileNavOpen]);
 
   return (
     <header className={`site-header ${isPortalView ? "is-portal-topbar" : ""}`}>
       <div className="header-inner">
-        {/* Left: Mobile hamburger (if portal) + Brand */}
+        {/* Left: Mobile hamburger + Brand */}
         <div className="header-left">
-          {isPortalView && (
+          {isPortalView ? (
             <button
               type="button"
               className="mobile-menu-trigger"
@@ -38,9 +52,28 @@ export default function Topbar({
             >
               <Menu size={20} aria-hidden="true" />
             </button>
+          ) : (
+            <button
+              type="button"
+              className="mobile-menu-trigger"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              aria-label={mobileNavOpen ? "Close main menu" : "Open main menu"}
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-main-nav"
+            >
+              {mobileNavOpen ? (
+                <X size={20} aria-hidden="true" />
+              ) : (
+                <Menu size={20} aria-hidden="true" />
+              )}
+            </button>
           )}
 
-          <NavLink className="brand" to="/" aria-label="GrantWise Tagbilaran home">
+          <NavLink
+            className="brand"
+            to="/"
+            aria-label="GrantWise Tagbilaran home"
+          >
             <span className="brand-mark">
               <Landmark size={20} strokeWidth={1.8} aria-hidden="true" />
             </span>
@@ -54,13 +87,11 @@ export default function Topbar({
         {/* Center: Main public navigation (if not in portal view) or breadcrumb */}
         {!isPortalView ? (
           <nav className="main-nav" aria-label="Main navigation">
-            <NavLink to="/" end>
-              Home
-            </NavLink>
-            <NavLink to="/programs">Programs</NavLink>
-            <NavLink to="/application-guide">How to Apply</NavLink>
-            <NavLink to="/portals">Portals</NavLink>
-            <NavLink to="/status">System Status</NavLink>
+            {PUBLIC_NAV_LINKS.map(({ to, label, end }) => (
+              <NavLink key={to} to={to} end={end}>
+                {label}
+              </NavLink>
+            ))}
           </nav>
         ) : (
           <div className="portal-breadcrumbs">
@@ -121,6 +152,20 @@ export default function Topbar({
           )}
         </div>
       </div>
+
+      {!isPortalView && mobileNavOpen && (
+        <nav
+          id="mobile-main-nav"
+          className="mobile-nav-panel"
+          aria-label="Main navigation (mobile)"
+        >
+          {PUBLIC_NAV_LINKS.map(({ to, label, end }) => (
+            <NavLink key={to} to={to} end={end}>
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+      )}
     </header>
   );
 }
