@@ -6,15 +6,20 @@ import { apiRequest } from "../services/api.js";
 
 function formatDate(value) {
   if (!value) return null;
+  const text = String(value);
+  const isPlainDate = /^\d{4}-\d{2}-\d{2}$/.test(text);
+  const date = isPlainDate ? new Date(`${text}T00:00:00Z`) : new Date(text);
+  if (Number.isNaN(date.getTime())) return null;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00Z`));
+    ...(isPlainDate ? { timeZone: "UTC" } : {}),
+  }).format(date);
 }
 
 export default function ProgramsPage() {
   const [programs, setPrograms] = useState([]);
-  const [applicationSubmissionEnabled, setApplicationSubmissionEnabled] = useState(false);
+  const [applicationSubmissionEnabled, setApplicationSubmissionEnabled] =
+    useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -27,11 +32,14 @@ export default function ProgramsPage() {
         }
         if (active) {
           setPrograms(data.programs);
-          setApplicationSubmissionEnabled(data.applicationSubmissionEnabled === true);
+          setApplicationSubmissionEnabled(
+            data.applicationSubmissionEnabled === true,
+          );
         }
       })
       .catch((requestError) => {
-        if (active) setError(requestError.message || "Could not load programs.");
+        if (active)
+          setError(requestError.message || "Could not load programs.");
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -50,13 +58,17 @@ export default function ProgramsPage() {
       />
 
       {loading && <p role="status">Loading available programs...</p>}
-      {error && <p role="alert" className="text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="text-red-600">
+          {error}
+        </p>
+      )}
       {!loading && !error && programs.length === 0 && (
         <section className="access-principle" aria-live="polite">
           <strong>No programs are currently available.</strong>
           <p>
-            There are no active, non-expired programs in the database right
-            now. Check again later or follow official City announcements.
+            There are no active, non-expired programs in the database right now.
+            Check again later or follow official City announcements.
           </p>
         </section>
       )}
@@ -77,9 +89,11 @@ export default function ProgramsPage() {
                   </span>
                 </div>
                 <h2>{program.program_name}</h2>
-                {program.funding_unit_name && <p>{program.funding_unit_name}</p>}
+                {program.funding_unit_name && (
+                  <p>{program.funding_unit_name}</p>
+                )}
                 <p>
-                  {(program.cycle_code || program.funding_cycle)
+                  {program.cycle_code || program.funding_cycle
                     ? `Funding cycle ${program.cycle_code || program.funding_cycle}`
                     : "Funding cycle dates are not listed."}
                 </p>
@@ -91,10 +105,11 @@ export default function ProgramsPage() {
                 </p>
                 <p>
                   Program-specific eligibility details are not recorded in the
-                  database. Confirm eligibility and required documents with
-                  the funding unit.
+                  database. Confirm eligibility and required documents with the
+                  funding unit.
                 </p>
-                {program.availability === "open" && applicationSubmissionEnabled ? (
+                {program.availability === "open" &&
+                applicationSubmissionEnabled ? (
                   <Link
                     className="text-link"
                     to={`/portal/student?programId=${program.program_id}`}
@@ -103,7 +118,10 @@ export default function ProgramsPage() {
                     <ArrowRight size={16} aria-hidden="true" />
                   </Link>
                 ) : program.availability === "open" ? (
-                  <p>Online applications are unavailable until the database workflow is updated.</p>
+                  <p>
+                    Online applications are unavailable until the database
+                    workflow is updated.
+                  </p>
                 ) : (
                   <p>Applications have not opened yet.</p>
                 )}
