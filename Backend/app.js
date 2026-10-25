@@ -4106,7 +4106,7 @@ function createApp({
         const capabilities = await getSchemaCapabilities(pool);
         const fundingUnits = capabilities.relationalProgramSchema
           ? await pool.query(
-              `SELECT funding_unit_id, funding_unit_name, funding_unit_code, status
+              `SELECT funding_unit_id, funding_unit_name, NULL::text AS funding_unit_code, status
                          FROM "Funding_Units"
                          WHERE status = 'active'
                          ORDER BY funding_unit_id`,
@@ -5045,6 +5045,7 @@ function createApp({
       path: req.path,
       code: error.code,
       name: error.name,
+      message: error.message,
     });
     return res.status(500).json({ message: "An internal error occurred." });
   });
