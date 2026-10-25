@@ -48,9 +48,9 @@ export default function StaffPortalPage() {
   const previewScopeId = Number(searchParams.get("previewScopeId"));
   const hasDeveloperPreview = Boolean(
     strategy &&
-      previewRole === strategy.roleName &&
-      Number.isSafeInteger(previewScopeId) &&
-      previewScopeId > 0,
+    previewRole === strategy.roleName &&
+    Number.isSafeInteger(previewScopeId) &&
+    previewScopeId > 0,
   );
   const previewDisplayName = searchParams.get("previewName");
 
@@ -115,7 +115,10 @@ export default function StaffPortalPage() {
     if (!strategy) return;
     setError(null);
     try {
-      const loaded = await strategy.loadDashboardData(requestPortalData, apiRequest);
+      const loaded = await strategy.loadDashboardData(
+        requestPortalData,
+        apiRequest,
+      );
       setData(loaded);
     } catch (requestError) {
       setError({
@@ -204,7 +207,8 @@ export default function StaffPortalPage() {
       setError({
         status: requestError.status,
         title: "Transaction failed",
-        message: requestError.message || "The requested action could not be saved.",
+        message:
+          requestError.message || "The requested action could not be saved.",
       });
       return false;
     } finally {
@@ -277,7 +281,10 @@ export default function StaffPortalPage() {
       barangayId: Number(r.barangayId),
       allocatedAmount: Number(r.allocatedAmount),
     }));
-    const totalAllocated = allocations.reduce((sum, a) => sum + a.allocatedAmount, 0);
+    const totalAllocated = allocations.reduce(
+      (sum, a) => sum + a.allocatedAmount,
+      0,
+    );
     if (totalAllocated > Number(allocationProgram.total_budget)) {
       setError({
         title: "Budget constraint violated",
@@ -288,10 +295,13 @@ export default function StaffPortalPage() {
 
     const saved = await handleMutation(
       () =>
-        apiRequest(`admin/programs/${allocationProgram.program_id}/barangay-allocations`, {
-          method: "PUT",
-          body: JSON.stringify({ allocations }),
-        }),
+        apiRequest(
+          `admin/programs/${allocationProgram.program_id}/barangay-allocations`,
+          {
+            method: "PUT",
+            body: JSON.stringify({ allocations }),
+          },
+        ),
       "Barangay allocations updated successfully.",
     );
     if (saved) {
@@ -301,6 +311,8 @@ export default function StaffPortalPage() {
 
   // Verification Decision Handling
   function openReviewModal(item) {
+    setError(null);
+    setSuccess("");
     setReviewModalItem(item);
     setDecisionType("approved");
     setDecisionRemarks("");
@@ -324,7 +336,9 @@ export default function StaffPortalPage() {
         vStrategy.submitDecision(apiRequest, reviewModalItem.verification_id, {
           status: decisionType,
           remarks: decisionRemarks.trim() || null,
-          awardAmount: decisionAwardAmount ? Number(decisionAwardAmount) : undefined,
+          awardAmount: decisionAwardAmount
+            ? Number(decisionAwardAmount)
+            : undefined,
         }),
       decisionType === "approved"
         ? strategy.base === "admin"
@@ -453,7 +467,11 @@ export default function StaffPortalPage() {
               disabled={busy}
               title="Refresh queue and budget records"
             >
-              <RefreshCw size={15} className={busy ? "spin" : ""} aria-hidden="true" />
+              <RefreshCw
+                size={15}
+                className={busy ? "spin" : ""}
+                aria-hidden="true"
+              />
               <span>Refresh</span>
             </button>
           )}
@@ -461,7 +479,11 @@ export default function StaffPortalPage() {
             <button
               type="button"
               className="button button-primary"
-              onClick={() => setCreateProgramModalOpen(true)}
+              onClick={() => (
+                setError(null),
+                setSuccess(""),
+                setCreateProgramModalOpen(true)
+              )}
             >
               <Plus size={16} aria-hidden="true" />
               <span>Create Program</span>
@@ -477,7 +499,9 @@ export default function StaffPortalPage() {
           <div>
             <strong>Read-Only Developer Preview Active</strong>
             <p>
-              Simulating authorized access for {strategy.roleName} ({previewDisplayName || `Scope #${previewScopeId}`}). Mutations are restricted.
+              Simulating authorized access for {strategy.roleName} (
+              {previewDisplayName || `Scope #${previewScopeId}`}). Mutations are
+              restricted.
             </p>
           </div>
         </div>
@@ -533,7 +557,10 @@ export default function StaffPortalPage() {
                 />
                 <StatCard
                   title="Available Budget"
-                  value={formatPhp(Number(data.summary?.remaining_budget || 0) - Number(data.summary?.reserved_budget || 0))}
+                  value={formatPhp(
+                    Number(data.summary?.remaining_budget || 0) -
+                      Number(data.summary?.reserved_budget || 0),
+                  )}
                   subtext={`Total: ${formatPhp(data.summary?.total_budget || 0)}`}
                   icon={Building2}
                   variant="success"
@@ -546,7 +573,9 @@ export default function StaffPortalPage() {
                 remainingBudget={data.summary?.remaining_budget}
                 reservedBudget={data.summary?.reserved_budget}
                 releasedBudget={data.summary?.released_budget}
-                programName={data.programs?.[0]?.program_name || "Funding Unit Portfolio"}
+                programName={
+                  data.programs?.[0]?.program_name || "Funding Unit Portfolio"
+                }
                 fundingCycle={data.fundingCycles?.[0]?.cycle_code}
               />
 
@@ -556,7 +585,8 @@ export default function StaffPortalPage() {
                   <div>
                     <h2>Scholarship Programs & Barangay Allocations</h2>
                     <p className="text-muted text-xs">
-                      Authorized funding programs and quota allocations for Tagbilaran barangays.
+                      Authorized funding programs and quota allocations for
+                      Tagbilaran barangays.
                     </p>
                   </div>
                 </div>
@@ -574,7 +604,9 @@ export default function StaffPortalPage() {
                       cell: (row) => (
                         <div>
                           <strong>{row.program_name}</strong>
-                          <div className="text-muted text-xs">Cycle: {row.cycle_code}</div>
+                          <div className="text-muted text-xs">
+                            Cycle: {row.cycle_code}
+                          </div>
                         </div>
                       ),
                     },
@@ -601,7 +633,9 @@ export default function StaffPortalPage() {
                       accessor: "status",
                       cell: (row) => (
                         <StatusBadge
-                          status={row.status === "active" ? "approved" : "neutral"}
+                          status={
+                            row.status === "active" ? "approved" : "neutral"
+                          }
                           customLabel={displayStatus(row.status)}
                         />
                       ),
@@ -618,13 +652,18 @@ export default function StaffPortalPage() {
                             disabled={developerPreview}
                             title="Manage barangay quota and allocations"
                           >
-                            Allocations ({row.barangay_allocations?.length || 0})
+                            Allocations ({row.barangay_allocations?.length || 0}
+                            )
                           </button>
                           <button
                             type="button"
                             className="button button-outline button-sm"
                             onClick={() => handleToggleProgramStatus(row)}
-                            disabled={developerPreview || row.status === "closed" || busy}
+                            disabled={
+                              developerPreview ||
+                              row.status === "closed" ||
+                              busy
+                            }
                           >
                             {row.status === "active" ? "Pause" : "Activate"}
                           </button>
@@ -641,7 +680,8 @@ export default function StaffPortalPage() {
                   <div>
                     <h2>LGU Final Review Queue</h2>
                     <p className="text-muted text-xs">
-                      Endorsed applications requiring final municipal review, duplicate grant verification, and award reservation.
+                      Endorsed applications requiring final municipal review,
+                      duplicate grant verification, and award reservation.
                     </p>
                   </div>
                 </div>
@@ -649,7 +689,14 @@ export default function StaffPortalPage() {
                 <DataTable
                   keyField="verification_id"
                   data={data.verifications || []}
-                  searchFields={["first_name", "last_name", "student_number", "program_name", "school_name", "barangay_name"]}
+                  searchFields={[
+                    "first_name",
+                    "last_name",
+                    "student_number",
+                    "program_name",
+                    "school_name",
+                    "barangay_name",
+                  ]}
                   searchPlaceholder="Search review queue..."
                   emptyTitle="No applications pending LGU review"
                   emptyDescription="All endorsed applications have been processed for your funding unit."
@@ -660,8 +707,12 @@ export default function StaffPortalPage() {
                       sortable: true,
                       cell: (row) => (
                         <div>
-                          <strong>{row.first_name} {row.last_name}</strong>
-                          <div className="text-muted text-xs">{row.student_number}</div>
+                          <strong>
+                            {row.first_name} {row.last_name}
+                          </strong>
+                          <div className="text-muted text-xs">
+                            {row.student_number}
+                          </div>
                         </div>
                       ),
                     },
@@ -676,7 +727,9 @@ export default function StaffPortalPage() {
                       cell: (row) => (
                         <div>
                           <span>{row.school_name}</span>
-                          <div className="text-muted text-xs">Brgy. {row.barangay_name}</div>
+                          <div className="text-muted text-xs">
+                            Brgy. {row.barangay_name}
+                          </div>
                         </div>
                       ),
                     },
@@ -685,14 +738,17 @@ export default function StaffPortalPage() {
                       accessor: "course",
                       cell: (row) => (
                         <span className="text-xs">
-                          {row.course || "—"} {row.year_level ? `(${row.year_level})` : ""}
+                          {row.course || "—"}{" "}
+                          {row.year_level ? `(${row.year_level})` : ""}
                         </span>
                       ),
                     },
                     {
                       header: "Stage Status",
                       accessor: "status",
-                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                      cell: (row) => (
+                        <StatusBadge status={row.status} type="verification" />
+                      ),
                     },
                     {
                       header: "Actions",
@@ -718,22 +774,36 @@ export default function StaffPortalPage() {
                 <DataTable
                   keyField="application_id"
                   data={data.applications || []}
-                  searchFields={["first_name", "last_name", "student_number", "program_name", "school_name", "barangay_name"]}
+                  searchFields={[
+                    "first_name",
+                    "last_name",
+                    "student_number",
+                    "program_name",
+                    "school_name",
+                    "barangay_name",
+                  ]}
                   searchPlaceholder="Search all unit applications..."
                   columns={[
                     {
                       header: "Applicant",
                       accessor: "last_name",
                       sortable: true,
-                      cell: (row) => `${row.first_name} ${row.last_name} (${row.student_number})`,
+                      cell: (row) =>
+                        `${row.first_name} ${row.last_name} (${row.student_number})`,
                     },
-                    { header: "Program", accessor: "program_name", sortable: true },
+                    {
+                      header: "Program",
+                      accessor: "program_name",
+                      sortable: true,
+                    },
                     { header: "School", accessor: "school_name" },
                     { header: "Barangay", accessor: "barangay_name" },
                     {
                       header: "Application Status",
                       accessor: "application_status",
-                      cell: (row) => <StatusBadge status={row.application_status} />,
+                      cell: (row) => (
+                        <StatusBadge status={row.application_status} />
+                      ),
                     },
                   ]}
                 />
@@ -772,7 +842,9 @@ export default function StaffPortalPage() {
                   <div>
                     <h2>Barangay Residency Verification Queue</h2>
                     <p className="text-muted text-xs">
-                      Verify genuine residency, voter registration, or certificate of indigency for applicants residing in your barangay.
+                      Verify genuine residency, voter registration, or
+                      certificate of indigency for applicants residing in your
+                      barangay.
                     </p>
                   </div>
                 </div>
@@ -780,7 +852,13 @@ export default function StaffPortalPage() {
                 <DataTable
                   keyField="verification_id"
                   data={data.verifications || []}
-                  searchFields={["first_name", "last_name", "student_number", "school_name", "program_name"]}
+                  searchFields={[
+                    "first_name",
+                    "last_name",
+                    "student_number",
+                    "school_name",
+                    "program_name",
+                  ]}
                   searchPlaceholder="Search residency queue..."
                   emptyTitle="No pending barangay verifications"
                   emptyDescription="Your barangay verification queue is completely clear."
@@ -791,12 +869,20 @@ export default function StaffPortalPage() {
                       sortable: true,
                       cell: (row) => (
                         <div>
-                          <strong>{row.first_name} {row.last_name}</strong>
-                          <div className="text-muted text-xs">ID: {row.student_number}</div>
+                          <strong>
+                            {row.first_name} {row.last_name}
+                          </strong>
+                          <div className="text-muted text-xs">
+                            ID: {row.student_number}
+                          </div>
                         </div>
                       ),
                     },
-                    { header: "Program", accessor: "program_name", sortable: true },
+                    {
+                      header: "Program",
+                      accessor: "program_name",
+                      sortable: true,
+                    },
                     { header: "School", accessor: "school_name" },
                     {
                       header: "Residency",
@@ -806,7 +892,9 @@ export default function StaffPortalPage() {
                     {
                       header: "Status",
                       accessor: "status",
-                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                      cell: (row) => (
+                        <StatusBadge status={row.status} type="verification" />
+                      ),
                     },
                     {
                       header: "Actions",
@@ -859,7 +947,8 @@ export default function StaffPortalPage() {
                   <div>
                     <h2>Academic & Enrollment Verification Queue</h2>
                     <p className="text-muted text-xs">
-                      Verify student registration, academic standing, and submit official grade reports or eligibility records.
+                      Verify student registration, academic standing, and submit
+                      official grade reports or eligibility records.
                     </p>
                   </div>
                 </div>
@@ -867,7 +956,13 @@ export default function StaffPortalPage() {
                 <DataTable
                   keyField="verification_id"
                   data={data.verifications || []}
-                  searchFields={["first_name", "last_name", "student_number", "course", "program_name"]}
+                  searchFields={[
+                    "first_name",
+                    "last_name",
+                    "student_number",
+                    "course",
+                    "program_name",
+                  ]}
                   searchPlaceholder="Search academic queue..."
                   emptyTitle="No academic verifications pending"
                   emptyDescription="All student applications for your school have been verified."
@@ -878,8 +973,12 @@ export default function StaffPortalPage() {
                       sortable: true,
                       cell: (row) => (
                         <div>
-                          <strong>{row.first_name} {row.last_name}</strong>
-                          <div className="text-muted text-xs">{row.student_number}</div>
+                          <strong>
+                            {row.first_name} {row.last_name}
+                          </strong>
+                          <div className="text-muted text-xs">
+                            {row.student_number}
+                          </div>
                         </div>
                       ),
                     },
@@ -887,12 +986,15 @@ export default function StaffPortalPage() {
                     {
                       header: "Curriculum",
                       accessor: "course",
-                      cell: (row) => `${row.course || "—"} (${row.year_level || "1st Year"})`,
+                      cell: (row) =>
+                        `${row.course || "—"} (${row.year_level || "1st Year"})`,
                     },
                     {
                       header: "Verification Status",
                       accessor: "status",
-                      cell: (row) => <StatusBadge status={row.status} type="verification" />,
+                      cell: (row) => (
+                        <StatusBadge status={row.status} type="verification" />
+                      ),
                     },
                     {
                       header: "Actions",
@@ -943,7 +1045,9 @@ export default function StaffPortalPage() {
               maxLength={200}
               placeholder="e.g., Tagbilaran Tertiary Educational Assistance 2026"
               value={programForm.programName}
-              onChange={(e) => setProgramForm({ ...programForm, programName: e.target.value })}
+              onChange={(e) =>
+                setProgramForm({ ...programForm, programName: e.target.value })
+              }
             />
           </div>
 
@@ -953,7 +1057,12 @@ export default function StaffPortalPage() {
               <select
                 required
                 value={programForm.fundingCycleId}
-                onChange={(e) => setProgramForm({ ...programForm, fundingCycleId: e.target.value })}
+                onChange={(e) =>
+                  setProgramForm({
+                    ...programForm,
+                    fundingCycleId: e.target.value,
+                  })
+                }
               >
                 <option value="">Select funding cycle</option>
                 {(data?.fundingCycles || []).map((c) => (
@@ -973,7 +1082,12 @@ export default function StaffPortalPage() {
                 step="0.01"
                 placeholder="500000.00"
                 value={programForm.totalBudget}
-                onChange={(e) => setProgramForm({ ...programForm, totalBudget: e.target.value })}
+                onChange={(e) =>
+                  setProgramForm({
+                    ...programForm,
+                    totalBudget: e.target.value,
+                  })
+                }
               />
             </div>
           </div>
@@ -984,7 +1098,9 @@ export default function StaffPortalPage() {
               <input
                 type="date"
                 value={programForm.startDate}
-                onChange={(e) => setProgramForm({ ...programForm, startDate: e.target.value })}
+                onChange={(e) =>
+                  setProgramForm({ ...programForm, startDate: e.target.value })
+                }
               />
             </div>
             <div className="form-field">
@@ -992,10 +1108,22 @@ export default function StaffPortalPage() {
               <input
                 type="date"
                 value={programForm.endDate}
-                onChange={(e) => setProgramForm({ ...programForm, endDate: e.target.value })}
+                onChange={(e) =>
+                  setProgramForm({ ...programForm, endDate: e.target.value })
+                }
               />
             </div>
           </div>
+
+          {error && (
+            <div className="staff-notice staff-notice-error" role="alert">
+              <AlertCircle size={18} aria-hidden="true" />
+              <div>
+                <strong>{error.title}</strong>
+                <p>{error.message}</p>
+              </div>
+            </div>
+          )}
 
           <div className="modal-actions">
             <button
@@ -1005,7 +1133,11 @@ export default function StaffPortalPage() {
             >
               Cancel
             </button>
-            <button type="submit" className="button button-primary" disabled={busy}>
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={busy}
+            >
               {busy ? "Creating Program..." : "Create Program"}
             </button>
           </div>
@@ -1025,7 +1157,8 @@ export default function StaffPortalPage() {
         >
           <div className="allocation-editor-wrapper">
             <p className="text-sm text-muted mb-4">
-              Allocate authorized scholarship grant funds per Tagbilaran barangay. Allocations cannot exceed total program budget.
+              Allocate authorized scholarship grant funds per Tagbilaran
+              barangay. Allocations cannot exceed total program budget.
             </p>
 
             <div className="allocations-table-scroll">
@@ -1054,7 +1187,10 @@ export default function StaffPortalPage() {
                               key={b.barangay_id}
                               value={b.barangay_id}
                               disabled={allocationRows.some(
-                                (r, i) => i !== index && String(r.barangayId) === String(b.barangay_id),
+                                (r, i) =>
+                                  i !== index &&
+                                  String(r.barangayId) ===
+                                    String(b.barangay_id),
                               )}
                             >
                               {b.barangay_name}
@@ -1080,7 +1216,9 @@ export default function StaffPortalPage() {
                           type="button"
                           className="button button-outline button-sm text-red-600"
                           onClick={() => {
-                            const updated = allocationRows.filter((_, i) => i !== index);
+                            const updated = allocationRows.filter(
+                              (_, i) => i !== index,
+                            );
                             setAllocationRows(updated);
                           }}
                         >
@@ -1099,20 +1237,37 @@ export default function StaffPortalPage() {
                 className="button button-secondary button-sm"
                 onClick={() => {
                   const used = new Set(allocationRows.map((r) => r.barangayId));
-                  const nextAvail = (data?.barangays || []).find((b) => !used.has(String(b.barangay_id)));
+                  const nextAvail = (data?.barangays || []).find(
+                    (b) => !used.has(String(b.barangay_id)),
+                  );
                   if (nextAvail) {
-                    setAllocationRows([...allocationRows, { barangayId: String(nextAvail.barangay_id), allocatedAmount: "0" }]);
+                    setAllocationRows([
+                      ...allocationRows,
+                      {
+                        barangayId: String(nextAvail.barangay_id),
+                        allocatedAmount: "0",
+                      },
+                    ]);
                   }
                 }}
-                disabled={allocationRows.length >= (data?.barangays?.length || 0)}
+                disabled={
+                  allocationRows.length >= (data?.barangays?.length || 0)
+                }
               >
                 + Add Barangay Allocation
               </button>
 
               <div className="text-right">
-                <span className="text-xs text-muted block">Total Allocated Sum:</span>
+                <span className="text-xs text-muted block">
+                  Total Allocated Sum:
+                </span>
                 <strong className="text-base text-[var(--main-text)]">
-                  {formatPhp(allocationRows.reduce((sum, r) => sum + (Number(r.allocatedAmount) || 0), 0))}
+                  {formatPhp(
+                    allocationRows.reduce(
+                      (sum, r) => sum + (Number(r.allocatedAmount) || 0),
+                      0,
+                    ),
+                  )}
                 </strong>
               </div>
             </div>
@@ -1157,7 +1312,9 @@ export default function StaffPortalPage() {
                   <strong>{reviewModalItem.student_number}</strong>
                 </div>
                 <div>
-                  <span className="text-muted block text-xs">Barangay Residency:</span>
+                  <span className="text-muted block text-xs">
+                    Barangay Residency:
+                  </span>
                   <strong>Brgy. {reviewModalItem.barangay_name}</strong>
                 </div>
                 <div>
@@ -1166,7 +1323,10 @@ export default function StaffPortalPage() {
                 </div>
                 <div>
                   <span className="text-muted block text-xs">Curriculum:</span>
-                  <span>{reviewModalItem.course || "—"} ({reviewModalItem.year_level || "1st Year"})</span>
+                  <span>
+                    {reviewModalItem.course || "—"} (
+                    {reviewModalItem.year_level || "1st Year"})
+                  </span>
                 </div>
               </div>
             </div>
@@ -1184,7 +1344,10 @@ export default function StaffPortalPage() {
                   }`}
                   onClick={() => setDecisionType("approved")}
                 >
-                  <CheckCircle2 size={16} className="mx-auto mb-1 text-emerald-600" />
+                  <CheckCircle2
+                    size={16}
+                    className="mx-auto mb-1 text-emerald-600"
+                  />
                   {strategy.base === "admin" ? "Approve & Award" : "Endorse"}
                 </button>
 
@@ -1219,7 +1382,9 @@ export default function StaffPortalPage() {
             {/* If LGU Admin and Approved: Award Amount input */}
             {strategy.base === "admin" && decisionType === "approved" && (
               <div className="form-field">
-                <label className="form-label">Scholarship Award Amount (PHP)</label>
+                <label className="form-label">
+                  Scholarship Award Amount (PHP)
+                </label>
                 <div className="input-with-icon">
                   <span className="input-leading-icon font-bold">₱</span>
                   <input
@@ -1233,10 +1398,13 @@ export default function StaffPortalPage() {
                   />
                 </div>
                 {decisionFieldError.awardAmount && (
-                  <span className="form-error-msg">{decisionFieldError.awardAmount}</span>
+                  <span className="form-error-msg">
+                    {decisionFieldError.awardAmount}
+                  </span>
                 )}
                 <span className="text-xs text-muted">
-                  Approving immediately reserves this amount from the program's available budget.
+                  Approving immediately reserves this amount from the program's
+                  available budget.
                 </span>
               </div>
             )}
@@ -1244,7 +1412,10 @@ export default function StaffPortalPage() {
             {/* Remarks input */}
             <div className="form-field">
               <label className="form-label">
-                Reviewer Remarks {decisionType !== "approved" && <span className="text-red-500">*</span>}
+                Reviewer Remarks{" "}
+                {decisionType !== "approved" && (
+                  <span className="text-red-500">*</span>
+                )}
               </label>
               <textarea
                 rows={3}
@@ -1254,9 +1425,21 @@ export default function StaffPortalPage() {
                 className={decisionFieldError.remarks ? "form-input-error" : ""}
               />
               {decisionFieldError.remarks && (
-                <span className="form-error-msg">{decisionFieldError.remarks}</span>
+                <span className="form-error-msg">
+                  {decisionFieldError.remarks}
+                </span>
               )}
             </div>
+
+            {error && (
+              <div className="staff-notice staff-notice-error" role="alert">
+                <AlertCircle size={18} aria-hidden="true" />
+                <div>
+                  <strong>{error.title}</strong>
+                  <p>{error.message}</p>
+                </div>
+              </div>
+            )}
 
             <div className="modal-actions">
               <button
@@ -1336,41 +1519,72 @@ export default function StaffPortalPage() {
             {academicSubTab === "view" && (
               <div className="space-y-4">
                 <div>
-                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Grade Reports</h4>
-                  {(academicDetail.academicRecords?.gradeReports || []).length === 0 ? (
-                    <p className="text-xs text-muted italic">No grade reports recorded for this applicant yet.</p>
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">
+                    Grade Reports
+                  </h4>
+                  {(academicDetail.academicRecords?.gradeReports || [])
+                    .length === 0 ? (
+                    <p className="text-xs text-muted italic">
+                      No grade reports recorded for this applicant yet.
+                    </p>
                   ) : (
                     <div className="space-y-2">
-                      {academicDetail.academicRecords.gradeReports.map((r, i) => (
-                        <div key={i} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between">
-                          <div>
-                            <strong>{r.school_year} · {r.semester}</strong>
-                            <p className="text-muted m-0">{r.remarks || "No remarks"}</p>
+                      {academicDetail.academicRecords.gradeReports.map(
+                        (r, i) => (
+                          <div
+                            key={i}
+                            className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between"
+                          >
+                            <div>
+                              <strong>
+                                {r.school_year} · {r.semester}
+                              </strong>
+                              <p className="text-muted m-0">
+                                {r.remarks || "No remarks"}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">
+                                GPA: {r.gpa}
+                              </span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <span className="text-emerald-700 dark:text-emerald-400 font-bold text-sm">GPA: {r.gpa}</span>
-                          </div>
-                        </div>
-                      ))}
+                        ),
+                      )}
                     </div>
                   )}
                 </div>
 
                 <div>
-                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Eligibility Checks</h4>
-                  {(academicDetail.academicRecords?.eligibilityChecks || []).length === 0 ? (
-                    <p className="text-xs text-muted italic">No eligibility checks recorded yet.</p>
+                  <h4 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">
+                    Eligibility Checks
+                  </h4>
+                  {(academicDetail.academicRecords?.eligibilityChecks || [])
+                    .length === 0 ? (
+                    <p className="text-xs text-muted italic">
+                      No eligibility checks recorded yet.
+                    </p>
                   ) : (
                     <div className="space-y-2">
-                      {academicDetail.academicRecords.eligibilityChecks.map((c, i) => (
-                        <div key={i} className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between items-center">
-                          <div>
-                            <strong>{c.check_type}</strong>
-                            <p className="text-muted m-0">{c.remarks || "No remarks"}</p>
+                      {academicDetail.academicRecords.eligibilityChecks.map(
+                        (c, i) => (
+                          <div
+                            key={i}
+                            className="p-3 rounded-lg border border-[var(--border-color)] bg-[var(--hover-bg)] text-xs flex justify-between items-center"
+                          >
+                            <div>
+                              <strong>{c.check_type}</strong>
+                              <p className="text-muted m-0">
+                                {c.remarks || "No remarks"}
+                              </p>
+                            </div>
+                            <StatusBadge
+                              status={c.result}
+                              customLabel={displayStatus(c.result)}
+                            />
                           </div>
-                          <StatusBadge status={c.result} customLabel={displayStatus(c.result)} />
-                        </div>
-                      ))}
+                        ),
+                      )}
                     </div>
                   )}
                 </div>
@@ -1386,7 +1600,12 @@ export default function StaffPortalPage() {
                     <input
                       required
                       value={gradeForm.schoolYear}
-                      onChange={(e) => setGradeForm({ ...gradeForm, schoolYear: e.target.value })}
+                      onChange={(e) =>
+                        setGradeForm({
+                          ...gradeForm,
+                          schoolYear: e.target.value,
+                        })
+                      }
                     />
                   </div>
                   <div className="form-field">
@@ -1394,13 +1613,17 @@ export default function StaffPortalPage() {
                     <input
                       required
                       value={gradeForm.semester}
-                      onChange={(e) => setGradeForm({ ...gradeForm, semester: e.target.value })}
+                      onChange={(e) =>
+                        setGradeForm({ ...gradeForm, semester: e.target.value })
+                      }
                     />
                   </div>
                 </div>
 
                 <div className="form-field">
-                  <label className="form-label">Grade Point Average (GPA)</label>
+                  <label className="form-label">
+                    Grade Point Average (GPA)
+                  </label>
                   <input
                     required
                     type="number"
@@ -1409,7 +1632,9 @@ export default function StaffPortalPage() {
                     max="5.00"
                     placeholder="e.g. 1.75"
                     value={gradeForm.gpa}
-                    onChange={(e) => setGradeForm({ ...gradeForm, gpa: e.target.value })}
+                    onChange={(e) =>
+                      setGradeForm({ ...gradeForm, gpa: e.target.value })
+                    }
                   />
                 </div>
 
@@ -1418,11 +1643,17 @@ export default function StaffPortalPage() {
                   <input
                     placeholder="e.g. Cleared for scholarship quota"
                     value={gradeForm.remarks}
-                    onChange={(e) => setGradeForm({ ...gradeForm, remarks: e.target.value })}
+                    onChange={(e) =>
+                      setGradeForm({ ...gradeForm, remarks: e.target.value })
+                    }
                   />
                 </div>
 
-                <button type="submit" className="button button-primary" disabled={busy}>
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={busy}
+                >
                   {busy ? "Saving Grade Report..." : "Save Grade Report"}
                 </button>
               </form>
@@ -1435,7 +1666,12 @@ export default function StaffPortalPage() {
                   <label className="form-label">Check Type</label>
                   <select
                     value={eligibilityForm.checkType}
-                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, checkType: e.target.value })}
+                    onChange={(e) =>
+                      setEligibilityForm({
+                        ...eligibilityForm,
+                        checkType: e.target.value,
+                      })
+                    }
                   >
                     <option value="enrollment_status">Enrollment Status</option>
                     <option value="academic_standing">Academic Standing</option>
@@ -1448,7 +1684,12 @@ export default function StaffPortalPage() {
                   <label className="form-label">Verification Result</label>
                   <select
                     value={eligibilityForm.result}
-                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, result: e.target.value })}
+                    onChange={(e) =>
+                      setEligibilityForm({
+                        ...eligibilityForm,
+                        result: e.target.value,
+                      })
+                    }
                   >
                     <option value="eligible">Eligible</option>
                     <option value="ineligible">Ineligible</option>
@@ -1461,12 +1702,23 @@ export default function StaffPortalPage() {
                   <input
                     placeholder="Optional notes or eligibility verification details"
                     value={eligibilityForm.remarks}
-                    onChange={(e) => setEligibilityForm({ ...eligibilityForm, remarks: e.target.value })}
+                    onChange={(e) =>
+                      setEligibilityForm({
+                        ...eligibilityForm,
+                        remarks: e.target.value,
+                      })
+                    }
                   />
                 </div>
 
-                <button type="submit" className="button button-primary" disabled={busy}>
-                  {busy ? "Saving Eligibility Record..." : "Save Eligibility Record"}
+                <button
+                  type="submit"
+                  className="button button-primary"
+                  disabled={busy}
+                >
+                  {busy
+                    ? "Saving Eligibility Record..."
+                    : "Save Eligibility Record"}
                 </button>
               </form>
             )}
