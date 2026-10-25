@@ -5,23 +5,12 @@ import {
   Copy,
   KeyRound,
   RefreshCw,
-  ShieldAlert,
   ShieldCheck,
-  UserPlus,
   XCircle,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
 import { apiRequest } from "../services/api.js";
-
-const ROLE_OPTIONS = [
-  { value: "LGU Admin", label: "LGU Program Admin (Funding-Unit Scoped)" },
-  {
-    value: "Barangay Coordinator",
-    label: "Barangay Coordinator (Barangay Scoped)",
-  },
-  { value: "Registrar", label: "School Registrar (School Scoped)" },
-];
 
 function formatDateTime(value) {
   if (!value) return "—";
@@ -84,6 +73,7 @@ export default function StaffAccessManagementPage() {
   const [schoolDomains, setSchoolDomains] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [copiedEmail, setCopiedEmail] = useState("");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState("");
   const [issuedInvitation, setIssuedInvitation] = useState(null);
@@ -93,24 +83,6 @@ export default function StaffAccessManagementPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [revokeReasonById, setRevokeReasonById] = useState({});
   const [confirmingRevokeId, setConfirmingRevokeId] = useState(null);
-
-  const [inviteForm, setInviteForm] = useState({
-    email: "",
-    role: "LGU Admin",
-    fundingUnitId: "",
-    barangayId: "",
-    schoolId: "",
-    positionTitle: "",
-    expiresInHours: "72",
-    notes: "",
-    lguPermissions: {
-      read_only_reports: true,
-      program_management: true,
-      application_review: true,
-      award_approval: true,
-      disbursement_release: false,
-    },
-  });
 
   const [domainForm, setDomainForm] = useState({
     mode: "existing",
@@ -236,127 +208,6 @@ export default function StaffAccessManagementPage() {
     return () => document.removeEventListener("click", handleSidebarClick);
   }, []);
 
-  function applyTemplate(template, role) {
-    setError(null);
-    setSuccess("");
-    if (role === "LGU Admin") {
-      const matchedUnit = lookups.fundingUnits.find(
-        (u) =>
-          u.funding_unit_name.toLowerCase() ===
-          String(template.suggestedFundingUnitName || "").toLowerCase(),
-      );
-      const perms = {
-        read_only_reports: false,
-        program_management: false,
-        application_review: false,
-        award_approval: false,
-        disbursement_release: false,
-      };
-      for (const key of template.recommendedPermissions || []) {
-        if (key in perms) perms[key] = true;
-      }
-      setInviteForm((current) => ({
-        ...current,
-        email: template.proposedEmail,
-        role: "LGU Admin",
-        fundingUnitId: matchedUnit ? String(matchedUnit.funding_unit_id) : "",
-        barangayId: "",
-        schoolId: "",
-        positionTitle: template.positionTitle || "",
-        notes: template.verificationNote || "",
-        lguPermissions: perms,
-      }));
-    } else if (role === "Barangay Coordinator") {
-      const matchedBarangay = lookups.barangays.find(
-        (b) =>
-          b.barangay_name.toLowerCase() ===
-          String(template.barangayName || "").toLowerCase(),
-      );
-      setInviteForm((current) => ({
-        ...current,
-        email: template.proposedEmail,
-        role: "Barangay Coordinator",
-        fundingUnitId: "",
-        barangayId: matchedBarangay ? String(matchedBarangay.barangay_id) : "",
-        schoolId: "",
-        positionTitle: `Barangay ${template.barangayName} Scholarship Coordinator`,
-        notes:
-          "Proposed barangay coordinator directory entry — requires email ownership verification.",
-      }));
-    } else if (role === "Registrar") {
-      const matchedSchool = lookups.schools.find(
-        (s) =>
-          s.school_name.toLowerCase() ===
-          String(template.dbSchoolName || "").toLowerCase(),
-      );
-      setInviteForm((current) => ({
-        ...current,
-        email: template.proposedEmail,
-        role: "Registrar",
-        fundingUnitId: "",
-        barangayId: "",
-        schoolId: matchedSchool ? String(matchedSchool.school_id) : "",
-        positionTitle: `${template.displayName} Registrar`,
-        notes: `Scoped strictly to ${template.intendedAccess}.`,
-      }));
-    }
-  }
-
-  async function handleCreateAuthorization(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    setSuccess("");
-    setIssuedInvitation(null);
-
-    try {
-      const payload = {
-        email: inviteForm.email.trim().toLowerCase(),
-        role: inviteForm.role,
-        positionTitle: inviteForm.positionTitle.trim() || null,
-        expiresInHours: Number(inviteForm.expiresInHours) || 72,
-        notes: inviteForm.notes.trim() || null,
-      };
-      if (inviteForm.role === "LGU Admin") {
-        payload.fundingUnitId = Number(inviteForm.fundingUnitId);
-        payload.lguPermissions = inviteForm.lguPermissions;
-      } else if (inviteForm.role === "Barangay Coordinator") {
-        payload.barangayId = Number(inviteForm.barangayId);
-      } else if (inviteForm.role === "Registrar") {
-        payload.schoolId = Number(inviteForm.schoolId);
-      }
-
-      const result = await apiRequest("system-admin/staff-authorizations", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-
-      setSuccess(result.message || "Staff email authorization created.");
-      setIssuedInvitation({
-        email: result.authorization.email,
-        role: result.authorization.role_name,
-        invitationToken: result.invitationToken,
-        emailSent: Boolean(result.emailDelivery?.emailSent),
-        expiresAt: result.authorization.expires_at,
-      });
-      setInviteForm((current) => ({
-        ...current,
-        email: "",
-        positionTitle: "",
-        notes: "",
-      }));
-      await loadSystemAdminData();
-    } catch (requestError) {
-      setError({
-        status: requestError.status,
-        title: "Could not authorize staff email.",
-        message: requestError.message || "Check the form fields and try again.",
-      });
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function handleRegenerateToken(authorizationId) {
     setBusy(true);
     setError(null);
@@ -477,6 +328,25 @@ export default function StaffAccessManagementPage() {
     }
   }
 
+  async function handleCopyEmail(email) {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopiedEmail(email);
+      setTimeout(() => {
+        setCopiedEmail((current) => (current === email ? "" : current));
+      }, 2000);
+    } catch {
+      setCopiedEmail("");
+    }
+  }
+
+  function permissionLabel(key) {
+    return (
+      lookups.lguPermissionCategories.find((item) => item.key === key)?.label ||
+      key
+    );
+  }
+
   const filteredAuthorizations = authorizations.filter((auth) => {
     if (roleFilter !== "ALL" && auth.role_name !== roleFilter) return false;
     if (statusFilter !== "ALL" && auth.status !== statusFilter) return false;
@@ -502,8 +372,8 @@ export default function StaffAccessManagementPage() {
     <div className="page-container information-page">
       <PageHeading
         eyebrow="DEVELOPER & SYSTEM ADMIN ACCESS CONTROL"
-        title="Staff Email Allowlist, Invitations & School Scopes."
-        description="Authorize specific staff email addresses, bind each invitation to a single role and organizational scope (funding unit, barangay, or school), manage verified school domains, and audit access changes."
+        title="Staff Access, School Scopes & Audit Logs."
+        description="Review authorized staff accounts and their organizational scopes (funding unit, barangay, or school), manage verified school domains, and audit access changes."
       />
 
       {identityState === "ready" && (
@@ -661,339 +531,12 @@ export default function StaffAccessManagementPage() {
             </div>
           </section>
 
-          <div className="portal-grid">
-            <section
-              className="auth-card"
-              id="invitations"
-              style={{ scrollMarginTop: "5rem" }}
-            >
-              <p className="eyebrow">1. AUTHORIZE & INVITE STAFF MEMBER</p>
-              <h2>Add email to staff allowlist.</h2>
-              <p className="field-hint">
-                Only explicitly authorized email addresses can register for a
-                staff role via <code>/staff-register</code>. Every staff account
-                is bound to a single organizational scope on the backend.
-              </p>
-
-              <form onSubmit={handleCreateAuthorization} className="auth-form">
-                <div className="form-field">
-                  <label className="form-label" htmlFor="invite-email">
-                    Staff email address
-                  </label>
-                  <input
-                    id="invite-email"
-                    className="form-input"
-                    type="email"
-                    placeholder="shareerizal@admin.com or registrar@hnu.edu.ph"
-                    value={inviteForm.email}
-                    onChange={(e) =>
-                      setInviteForm((c) => ({ ...c, email: e.target.value }))
-                    }
-                    onBlur={(e) =>
-                      setInviteForm((c) => ({
-                        ...c,
-                        email: e.target.value.trim().toLowerCase(),
-                      }))
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="form-field">
-                  <label className="form-label" htmlFor="invite-role">
-                    Permitted staff role
-                  </label>
-                  <select
-                    id="invite-role"
-                    className="form-input"
-                    value={inviteForm.role}
-                    onChange={(e) =>
-                      setInviteForm((c) => ({
-                        ...c,
-                        role: e.target.value,
-                        fundingUnitId: "",
-                        barangayId: "",
-                        schoolId: "",
-                      }))
-                    }
-                    required
-                  >
-                    {ROLE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {inviteForm.role === "LGU Admin" && (
-                  <>
-                    <div className="form-field">
-                      <label
-                        className="form-label"
-                        htmlFor="invite-funding-unit"
-                      >
-                        Assigned funding unit (required)
-                      </label>
-                      <select
-                        id="invite-funding-unit"
-                        className="form-input"
-                        value={inviteForm.fundingUnitId}
-                        onChange={(e) =>
-                          setInviteForm((c) => ({
-                            ...c,
-                            fundingUnitId: e.target.value,
-                          }))
-                        }
-                        required
-                      >
-                        <option value="">
-                          Select one authorized funding unit
-                        </option>
-                        {lookups.fundingUnits.map((unit) => (
-                          <option
-                            key={unit.funding_unit_id}
-                            value={unit.funding_unit_id}
-                          >
-                            {unit.funding_unit_name} ({unit.funding_unit_code})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="form-field">
-                      <span className="form-label">
-                        Granular LGU permissions (least-privilege scope)
-                      </span>
-                      <div className="password-checklist">
-                        {lookups.lguPermissionCategories.map((perm) => (
-                          <label key={perm.key} className="form-label">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(
-                                inviteForm.lguPermissions[perm.key],
-                              )}
-                              onChange={(e) =>
-                                setInviteForm((c) => ({
-                                  ...c,
-                                  lguPermissions: {
-                                    ...c.lguPermissions,
-                                    [perm.key]: e.target.checked,
-                                  },
-                                }))
-                              }
-                            />{" "}
-                            <strong>{perm.label}</strong> — {perm.description}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {inviteForm.role === "Barangay Coordinator" && (
-                  <div className="form-field">
-                    <label className="form-label" htmlFor="invite-barangay">
-                      Assigned Tagbilaran barangay (required)
-                    </label>
-                    <select
-                      id="invite-barangay"
-                      className="form-input"
-                      value={inviteForm.barangayId}
-                      onChange={(e) =>
-                        setInviteForm((c) => ({
-                          ...c,
-                          barangayId: e.target.value,
-                        }))
-                      }
-                      required
-                    >
-                      <option value="">Select one authorized barangay</option>
-                      {lookups.barangays.map((b) => (
-                        <option key={b.barangay_id} value={b.barangay_id}>
-                          {b.barangay_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {inviteForm.role === "Registrar" && (
-                  <div className="form-field">
-                    <label className="form-label" htmlFor="invite-school">
-                      Assigned school (required)
-                    </label>
-                    <select
-                      id="invite-school"
-                      className="form-input"
-                      value={inviteForm.schoolId}
-                      onChange={(e) =>
-                        setInviteForm((c) => ({
-                          ...c,
-                          schoolId: e.target.value,
-                        }))
-                      }
-                      required
-                    >
-                      <option value="">Select one authorized school</option>
-                      {lookups.schools.map((s) => (
-                        <option key={s.school_id} value={s.school_id}>
-                          {s.school_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="form-grid-two">
-                  <div className="form-field">
-                    <label className="form-label" htmlFor="invite-position">
-                      Position / office title
-                    </label>
-                    <input
-                      id="invite-position"
-                      className="form-input"
-                      placeholder="e.g., Scholarship Program Officer"
-                      value={inviteForm.positionTitle}
-                      onChange={(e) =>
-                        setInviteForm((c) => ({
-                          ...c,
-                          positionTitle: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-
-                  <div className="form-field">
-                    <label className="form-label" htmlFor="invite-expiration">
-                      Invitation expiration (hours)
-                    </label>
-                    <input
-                      id="invite-expiration"
-                      className="form-input"
-                      type="number"
-                      min="1"
-                      max="720"
-                      value={inviteForm.expiresInHours}
-                      onChange={(e) =>
-                        setInviteForm((c) => ({
-                          ...c,
-                          expiresInHours: e.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="form-field">
-                  <label className="form-label" htmlFor="invite-notes">
-                    Authorization notes / audit remarks
-                  </label>
-                  <input
-                    id="invite-notes"
-                    className="form-input"
-                    placeholder="Optional notes on office authorization"
-                    value={inviteForm.notes}
-                    onChange={(e) =>
-                      setInviteForm((c) => ({ ...c, notes: e.target.value }))
-                    }
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="button button-primary"
-                  disabled={busy}
-                >
-                  <UserPlus size={16} aria-hidden="true" /> Authorize & issue
-                  invitation
-                </button>
-              </form>
-            </section>
-
-            <section className="auth-card">
-              <p className="eyebrow">2. PROPOSED CONFIGURATION TEMPLATES</p>
-              <h2>Reference directories (not auto-activated).</h2>
-              <div className="auth-banner auth-banner-error">
-                <ShieldAlert size={18} aria-hidden="true" />
-                <div>
-                  <strong>Unverified placeholder warning</strong>
-                  <p>
-                    Entries below are configuration templates only. None of
-                    these accounts are created automatically; clicking a
-                    template only pre-fills the form on the left so an
-                    authorized developer can review and issue a single-use
-                    verification invitation.
-                  </p>
-                </div>
-              </div>
-
-              <h3>LGU Officials & Scholarship Office Templates</h3>
-              <ul>
-                {lookups.proposedDirectories.lguOfficials.map((item) => (
-                  <li key={item.proposedEmail}>
-                    <strong>{item.positionTitle}</strong> ({item.officialName})
-                    — <code>{item.proposedEmail}</code>{" "}
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => applyTemplate(item, "LGU Admin")}
-                    >
-                      Pre-fill form
-                    </button>
-                  </li>
-                ))}
-              </ul>
-
-              <h3>School Registrar Templates (5 Partner Colleges)</h3>
-              <ul>
-                {lookups.proposedDirectories.schoolRegistrars.map((item) => (
-                  <li key={item.proposedEmail}>
-                    <strong>{item.displayName}</strong> —{" "}
-                    <code>{item.proposedEmail}</code> ({item.candidateDomain}:{" "}
-                    {item.defaultDomainStatus}){" "}
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => applyTemplate(item, "Registrar")}
-                    >
-                      Pre-fill form
-                    </button>
-                  </li>
-                ))}
-              </ul>
-
-              <h3>15 Tagbilaran Barangay Coordinator Templates</h3>
-              <div className="form-grid-two">
-                {lookups.proposedDirectories.barangayCoordinators.map(
-                  (item) => (
-                    <div key={item.proposedEmail}>
-                      <strong>{item.barangayName}:</strong>{" "}
-                      <code>{item.proposedEmail}</code>{" "}
-                      <button
-                        type="button"
-                        className="text-link"
-                        onClick={() =>
-                          applyTemplate(item, "Barangay Coordinator")
-                        }
-                      >
-                        Use
-                      </button>
-                    </div>
-                  ),
-                )}
-              </div>
-            </section>
-          </div>
-
           <section
             className="auth-card"
-            id="staff-directory"
+            id="invitations"
             style={{ scrollMarginTop: "5rem" }}
           >
-            <p className="eyebrow">
-              3. STAFF EMAIL ALLOWLIST & INVITATION STATUS
-            </p>
+            <p className="eyebrow">1. AUTHORIZED STAFF DIRECTORY</p>
             <h2>
               Authorized staff directory ({filteredAuthorizations.length}).
             </h2>
@@ -1173,13 +716,88 @@ export default function StaffAccessManagementPage() {
             )}
           </section>
 
+          <section
+            className="auth-card"
+            id="templates"
+            style={{ scrollMarginTop: "5rem" }}
+          >
+            <p className="eyebrow">2. PROPOSED CONFIGURATION TEMPLATES</p>
+            <h2>Reference directories (read-only).</h2>
+
+            <h3>LGU Officials & Scholarship Office Templates</h3>
+            <ul>
+              {lookups.proposedDirectories.lguOfficials.map((item) => (
+                <li key={item.proposedEmail}>
+                  <strong>{item.positionTitle}</strong> ({item.officialName}) —{" "}
+                  <code>{item.proposedEmail}</code>
+                  <br />
+                  <small>
+                    Funding unit: {item.suggestedFundingUnitName} · Suggested
+                    access:{" "}
+                    {(item.recommendedPermissions || [])
+                      .map(permissionLabel)
+                      .join(", ") || "None"}
+                  </small>{" "}
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() => handleCopyEmail(item.proposedEmail)}
+                  >
+                    {copiedEmail === item.proposedEmail
+                      ? "Copied"
+                      : "Copy email"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <h3>School Registrar Templates (5 Partner Colleges)</h3>
+            <ul>
+              {lookups.proposedDirectories.schoolRegistrars.map((item) => (
+                <li key={item.proposedEmail}>
+                  <strong>{item.displayName}</strong> —{" "}
+                  <code>{item.proposedEmail}</code> ({item.candidateDomain}:{" "}
+                  {item.defaultDomainStatus}){" "}
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() => handleCopyEmail(item.proposedEmail)}
+                  >
+                    {copiedEmail === item.proposedEmail
+                      ? "Copied"
+                      : "Copy email"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+
+            <h3>15 Tagbilaran Barangay Coordinator Templates</h3>
+            <div className="form-grid-two">
+              {lookups.proposedDirectories.barangayCoordinators.map((item) => (
+                <div key={item.proposedEmail}>
+                  <strong>{item.barangayName}:</strong>{" "}
+                  <code>{item.proposedEmail}</code>{" "}
+                  <button
+                    type="button"
+                    className="text-link"
+                    onClick={() => handleCopyEmail(item.proposedEmail)}
+                  >
+                    {copiedEmail === item.proposedEmail
+                      ? "Copied"
+                      : "Copy email"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+
           <div className="portal-grid">
             <section
               className="auth-card"
               id="domains"
               style={{ scrollMarginTop: "5rem" }}
             >
-              <p className="eyebrow">4. SCHOOL EMAIL DOMAINS & HIGH SCHOOLS</p>
+              <p className="eyebrow">3. SCHOOL EMAIL DOMAINS & HIGH SCHOOLS</p>
               <h2>Configure partner schools & official domains.</h2>
               <p className="field-hint">
                 Add a new partner school (including Tagbilaran high schools when
@@ -1343,7 +961,7 @@ export default function StaffAccessManagementPage() {
               id="audits"
               style={{ scrollMarginTop: "5rem" }}
             >
-              <p className="eyebrow">5. SECURITY AUDIT LOGS</p>
+              <p className="eyebrow">4. SECURITY AUDIT LOGS</p>
               <h2>Recent authorization & access events.</h2>
               {auditLogs.length === 0 ? (
                 <p>No audit logs recorded yet.</p>
