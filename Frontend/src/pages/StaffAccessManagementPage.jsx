@@ -16,7 +16,10 @@ import { apiRequest } from "../services/api.js";
 
 const ROLE_OPTIONS = [
   { value: "LGU Admin", label: "LGU Program Admin (Funding-Unit Scoped)" },
-  { value: "Barangay Coordinator", label: "Barangay Coordinator (Barangay Scoped)" },
+  {
+    value: "Barangay Coordinator",
+    label: "Barangay Coordinator (Barangay Scoped)",
+  },
   { value: "Registrar", label: "School Registrar (School Scoped)" },
 ];
 
@@ -121,24 +124,54 @@ export default function StaffAccessManagementPage() {
 
   const loadSystemAdminData = useCallback(async () => {
     setError(null);
-    try {
-      const [lookupData, authData, domainData, auditData, previewData] = await Promise.all([
-        apiRequest("system-admin/lookups"),
-        apiRequest("system-admin/staff-authorizations"),
-        apiRequest("system-admin/school-domains"),
-        apiRequest("system-admin/audit-logs"),
-        apiRequest("system-admin/portal-previews"),
-      ]);
-      setLookups((current) => ({ ...current, ...lookupData }));
-      setAuthorizations(authData.authorizations || []);
-      setSchoolDomains(domainData.schoolDomains || []);
-      setAuditLogs(auditData.auditLogs || []);
-      setPortalPreviews(previewData.previews || []);
-    } catch (requestError) {
+    // allSettled: one failing endpoint no longer blanks out the whole page,
+    // and the error names exactly which part failed.
+    const labels = [
+      "lookups",
+      "staff authorizations",
+      "school domains",
+      "audit logs",
+      "portal previews",
+    ];
+    const results = await Promise.allSettled([
+      apiRequest("system-admin/lookups"),
+      apiRequest("system-admin/staff-authorizations"),
+      apiRequest("system-admin/school-domains"),
+      apiRequest("system-admin/audit-logs"),
+      apiRequest("system-admin/portal-previews"),
+    ]);
+    const [lookupRes, authRes, domainRes, auditRes, previewRes] = results;
+    if (lookupRes.status === "fulfilled") {
+      setLookups((current) => ({ ...current, ...lookupRes.value }));
+    }
+    if (authRes.status === "fulfilled") {
+      setAuthorizations(authRes.value.authorizations || []);
+    }
+    if (domainRes.status === "fulfilled") {
+      setSchoolDomains(domainRes.value.schoolDomains || []);
+    }
+    if (auditRes.status === "fulfilled") {
+      setAuditLogs(auditRes.value.auditLogs || []);
+    }
+    if (previewRes.status === "fulfilled") {
+      setPortalPreviews(previewRes.value.previews || []);
+    }
+    const failed = results
+      .map((result, index) =>
+        result.status === "rejected"
+          ? { label: labels[index], reason: result.reason }
+          : null,
+      )
+      .filter(Boolean);
+    if (failed.length > 0) {
       setError({
-        status: requestError.status,
+        status: failed[0].reason?.status,
         title: "Could not load Staff Access Management data.",
-        message: requestError.message || "Try again in a moment.",
+        message: `Failed to load: ${failed
+          .map((item) => item.label)
+          .join(
+            ", ",
+          )}. ${failed[0].reason?.message || "Try again in a moment."}`,
       });
     }
   }, []);
@@ -185,6 +218,24 @@ export default function StaffAccessManagementPage() {
     }
   }, [identityState, loadSystemAdminData]);
 
+  // The portal sidebar renders plain "#section" links (ids come from
+  // SystemAdminPortalStrategy: invitations, previews, domains, audits).
+  // Scroll smoothly to the matching section on this page.
+  useEffect(() => {
+    function handleSidebarClick(event) {
+      const link = event.target.closest?.('a.sidebar-nav-item[href^="#"]');
+      if (!link) return;
+      const hash = (link.getAttribute("href") || "").slice(1);
+      const target = hash ? document.getElementById(hash) : null;
+      if (target) {
+        event.preventDefault();
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+    document.addEventListener("click", handleSidebarClick);
+    return () => document.removeEventListener("click", handleSidebarClick);
+  }, []);
+
   function applyTemplate(template, role) {
     setError(null);
     setSuccess("");
@@ -229,7 +280,8 @@ export default function StaffAccessManagementPage() {
         barangayId: matchedBarangay ? String(matchedBarangay.barangay_id) : "",
         schoolId: "",
         positionTitle: `Barangay ${template.barangayName} Scholarship Coordinator`,
-        notes: "Proposed barangay coordinator directory entry — requires email ownership verification.",
+        notes:
+          "Proposed barangay coordinator directory entry — requires email ownership verification.",
       }));
     } else if (role === "Registrar") {
       const matchedSchool = lookups.schools.find(
@@ -455,14 +507,20 @@ export default function StaffAccessManagementPage() {
       />
 
       {identityState === "ready" && (
-        <section className="staff-panel">
+        <section
+          className="staff-panel"
+          id="previews"
+          style={{ scrollMarginTop: "5rem" }}
+        >
           <h2>Preview staff dashboards</h2>
           <p>
             Open an active LGU Admin, Barangay Coordinator, or Registrar
             dashboard in read-only mode.
           </p>
           {portalPreviews.length === 0 ? (
-            <p className="staff-empty">No active staff assignments are available to preview.</p>
+            <p className="staff-empty">
+              No active staff assignments are available to preview.
+            </p>
           ) : (
             <div className="staff-record-list">
               {portalPreviews.map((preview) => {
@@ -472,10 +530,15 @@ export default function StaffAccessManagementPage() {
                   previewName: preview.displayName,
                 });
                 return (
-                  <article className="staff-record" key={`${preview.role_name}-${preview.user_id}`}>
+                  <article
+                    className="staff-record"
+                    key={`${preview.role_name}-${preview.user_id}`}
+                  >
                     <div>
                       <strong>{preview.displayName}</strong>
-                      <p>{preview.email} · {preview.role_name}</p>
+                      <p>
+                        {preview.email} · {preview.role_name}
+                      </p>
                       <p>{preview.scope_name}</p>
                     </div>
                     <Link
@@ -556,7 +619,9 @@ export default function StaffAccessManagementPage() {
                 type="button"
                 className="button button-secondary"
                 onClick={() => {
-                  navigator.clipboard?.writeText(issuedInvitation.invitationToken);
+                  navigator.clipboard?.writeText(
+                    issuedInvitation.invitationToken,
+                  );
                 }}
               >
                 <Copy size={14} aria-hidden="true" /> Copy token
@@ -570,9 +635,12 @@ export default function StaffAccessManagementPage() {
         <>
           <section className="student-profile-summary">
             <div>
-              <span className="eyebrow">AUTHENTICATED DEVELOPER ADMINISTRATOR</span>
+              <span className="eyebrow">
+                AUTHENTICATED DEVELOPER ADMINISTRATOR
+              </span>
               <h2>
-                {currentUser?.firstName} {currentUser?.lastName} ({currentUser?.email})
+                {currentUser?.firstName} {currentUser?.lastName} (
+                {currentUser?.email})
               </h2>
               <p>
                 Role: {currentUser?.role} · Email Delivery:{" "}
@@ -594,7 +662,11 @@ export default function StaffAccessManagementPage() {
           </section>
 
           <div className="portal-grid">
-            <section className="auth-card">
+            <section
+              className="auth-card"
+              id="invitations"
+              style={{ scrollMarginTop: "5rem" }}
+            >
               <p className="eyebrow">1. AUTHORIZE & INVITE STAFF MEMBER</p>
               <h2>Add email to staff allowlist.</h2>
               <p className="field-hint">
@@ -657,7 +729,10 @@ export default function StaffAccessManagementPage() {
                 {inviteForm.role === "LGU Admin" && (
                   <>
                     <div className="form-field">
-                      <label className="form-label" htmlFor="invite-funding-unit">
+                      <label
+                        className="form-label"
+                        htmlFor="invite-funding-unit"
+                      >
                         Assigned funding unit (required)
                       </label>
                       <select
@@ -672,7 +747,9 @@ export default function StaffAccessManagementPage() {
                         }
                         required
                       >
-                        <option value="">Select one authorized funding unit</option>
+                        <option value="">
+                          Select one authorized funding unit
+                        </option>
                         {lookups.fundingUnits.map((unit) => (
                           <option
                             key={unit.funding_unit_id}
@@ -855,8 +932,8 @@ export default function StaffAccessManagementPage() {
               <ul>
                 {lookups.proposedDirectories.lguOfficials.map((item) => (
                   <li key={item.proposedEmail}>
-                    <strong>{item.positionTitle}</strong> ({item.officialName}) —{" "}
-                    <code>{item.proposedEmail}</code>{" "}
+                    <strong>{item.positionTitle}</strong> ({item.officialName})
+                    — <code>{item.proposedEmail}</code>{" "}
                     <button
                       type="button"
                       className="text-link"
@@ -888,28 +965,38 @@ export default function StaffAccessManagementPage() {
 
               <h3>15 Tagbilaran Barangay Coordinator Templates</h3>
               <div className="form-grid-two">
-                {lookups.proposedDirectories.barangayCoordinators.map((item) => (
-                  <div key={item.proposedEmail}>
-                    <strong>{item.barangayName}:</strong>{" "}
-                    <code>{item.proposedEmail}</code>{" "}
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() =>
-                        applyTemplate(item, "Barangay Coordinator")
-                      }
-                    >
-                      Use
-                    </button>
-                  </div>
-                ))}
+                {lookups.proposedDirectories.barangayCoordinators.map(
+                  (item) => (
+                    <div key={item.proposedEmail}>
+                      <strong>{item.barangayName}:</strong>{" "}
+                      <code>{item.proposedEmail}</code>{" "}
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() =>
+                          applyTemplate(item, "Barangay Coordinator")
+                        }
+                      >
+                        Use
+                      </button>
+                    </div>
+                  ),
+                )}
               </div>
             </section>
           </div>
 
-          <section className="auth-card">
-            <p className="eyebrow">3. STAFF EMAIL ALLOWLIST & INVITATION STATUS</p>
-            <h2>Authorized staff directory ({filteredAuthorizations.length}).</h2>
+          <section
+            className="auth-card"
+            id="staff-directory"
+            style={{ scrollMarginTop: "5rem" }}
+          >
+            <p className="eyebrow">
+              3. STAFF EMAIL ALLOWLIST & INVITATION STATUS
+            </p>
+            <h2>
+              Authorized staff directory ({filteredAuthorizations.length}).
+            </h2>
 
             <div className="form-grid-two">
               <div className="form-field">
@@ -924,7 +1011,9 @@ export default function StaffAccessManagementPage() {
                 >
                   <option value="ALL">All roles</option>
                   <option value="LGU Admin">LGU Admin</option>
-                  <option value="Barangay Coordinator">Barangay Coordinator</option>
+                  <option value="Barangay Coordinator">
+                    Barangay Coordinator
+                  </option>
                   <option value="Registrar">Registrar</option>
                 </select>
               </div>
@@ -966,12 +1055,10 @@ export default function StaffAccessManagementPage() {
             ) : (
               <div className="portal-grid">
                 {filteredAuthorizations.map((auth) => (
-                  <article
-                    key={auth.authorization_id}
-                    className="portal-card"
-                  >
+                  <article key={auth.authorization_id} className="portal-card">
                     <p className="eyebrow">
-                      {auth.role_name} · STATUS: {String(auth.status).toUpperCase()}
+                      {auth.role_name} · STATUS:{" "}
+                      {String(auth.status).toUpperCase()}
                     </p>
                     <h3>{auth.email}</h3>
                     <p>
@@ -983,14 +1070,16 @@ export default function StaffAccessManagementPage() {
                       </p>
                     )}
                     <p>
-                      <strong>Invited:</strong> {formatDateTime(auth.authorized_at)}
+                      <strong>Invited:</strong>{" "}
+                      {formatDateTime(auth.authorized_at)}
                       {auth.authorized_by_email
                         ? ` by ${auth.authorized_by_email}`
                         : ""}
                     </p>
                     {auth.expires_at && auth.status === "pending" && (
                       <p>
-                        <strong>Expires:</strong> {formatDateTime(auth.expires_at)}
+                        <strong>Expires:</strong>{" "}
+                        {formatDateTime(auth.expires_at)}
                       </p>
                     )}
                     {auth.activated_at && (
@@ -1001,7 +1090,8 @@ export default function StaffAccessManagementPage() {
                     )}
                     {auth.revoked_at && (
                       <p>
-                        <strong>Revoked:</strong> {formatDateTime(auth.revoked_at)}
+                        <strong>Revoked:</strong>{" "}
+                        {formatDateTime(auth.revoked_at)}
                         {auth.revocation_reason
                           ? ` (${auth.revocation_reason})`
                           : ""}
@@ -1084,7 +1174,11 @@ export default function StaffAccessManagementPage() {
           </section>
 
           <div className="portal-grid">
-            <section className="auth-card">
+            <section
+              className="auth-card"
+              id="domains"
+              style={{ scrollMarginTop: "5rem" }}
+            >
               <p className="eyebrow">4. SCHOOL EMAIL DOMAINS & HIGH SCHOOLS</p>
               <h2>Configure partner schools & official domains.</h2>
               <p className="field-hint">
@@ -1093,7 +1187,10 @@ export default function StaffAccessManagementPage() {
                 mark a domain as verified until confirmed with the institution.
               </p>
 
-              <form onSubmit={handleConfigureSchoolDomain} className="auth-form">
+              <form
+                onSubmit={handleConfigureSchoolDomain}
+                className="auth-form"
+              >
                 <div className="form-field">
                   <label className="form-label" htmlFor="domain-mode">
                     Target school
@@ -1106,7 +1203,9 @@ export default function StaffAccessManagementPage() {
                       setDomainForm((c) => ({ ...c, mode: e.target.value }))
                     }
                   >
-                    <option value="existing">Existing school in database</option>
+                    <option value="existing">
+                      Existing school in database
+                    </option>
                     <option value="new">Add new school / high school</option>
                   </select>
                 </div>
@@ -1160,7 +1259,8 @@ export default function StaffAccessManagementPage() {
                 <div className="form-grid-two">
                   <div className="form-field">
                     <label className="form-label" htmlFor="domain-value">
-                      Official email domain (optional if unknown for high school)
+                      Official email domain (optional if unknown for high
+                      school)
                     </label>
                     <input
                       id="domain-value"
@@ -1238,7 +1338,11 @@ export default function StaffAccessManagementPage() {
               </ul>
             </section>
 
-            <section className="auth-card">
+            <section
+              className="auth-card"
+              id="audits"
+              style={{ scrollMarginTop: "5rem" }}
+            >
               <p className="eyebrow">5. SECURITY AUDIT LOGS</p>
               <h2>Recent authorization & access events.</h2>
               {auditLogs.length === 0 ? (
