@@ -2659,7 +2659,7 @@ function createApp({
                         user_id, action_type, entity_type, entity_id, details
                      ) VALUES ($1, 'program_barangay_allocations_updated',
                                'Funding_Programs', $2,
-                               jsonb_build_object('allocation_count', $3))`,
+                               jsonb_build_object('allocation_count', $3::INTEGER))`,
           [req.auth.userId, programId, allocations.rowCount],
         );
         await client.query("COMMIT");
@@ -2793,8 +2793,8 @@ function createApp({
                         user_id, action_type, entity_type, entity_id, details
                      ) VALUES ($1, 'funding_program_created', 'Funding_Programs', $2,
                                jsonb_build_object(
-                                   'funding_unit_id', $3,
-                                   'funding_cycle_id', $4
+                                   'funding_unit_id', $3::INTEGER,
+                                   'funding_cycle_id', $4::INTEGER
                                ))`,
           [
             req.auth.userId,
@@ -3222,8 +3222,8 @@ function createApp({
                         user_id, action_type, entity_type, entity_id, details
                      ) VALUES ($1, 'staff_account_provisioned', 'Users', $2,
                                jsonb_build_object(
-                                   'provisioned_role', $3,
-                                   'scope_id', $4
+                                   'provisioned_role', $3::TEXT,
+                                   'scope_id', $4::INTEGER
                                ))`,
           [req.auth.userId, newUserId, data.role, targetScopeId],
         );
@@ -3869,7 +3869,7 @@ function createApp({
                              remarks = $2,
                              reviewed_by = $3,
                              reviewed_at = CASE
-                                 WHEN $1 IN ('approved', 'rejected') THEN NOW()
+                                 WHEN $5::TEXT IN ('approved', 'rejected') THEN NOW()
                                  ELSE NULL
                              END
                          WHERE verification_id = $4
@@ -3881,6 +3881,7 @@ function createApp({
               input.data.remarks || null,
               req.auth.userId,
               verificationId,
+              input.data.status,
             ],
           );
           let award = null;
@@ -3908,8 +3909,8 @@ function createApp({
                             user_id, action_type, entity_type, entity_id, details
                          ) VALUES ($1, $2, 'Application_Verifications', $3,
                                    jsonb_build_object(
-                                       'verification_type', $4,
-                                       'status', $5
+                                       'verification_type', $4::TEXT,
+                                       'status', $5::TEXT
                                    ))`,
             [
               req.auth.userId,
@@ -3932,9 +3933,22 @@ function createApp({
             });
           }
           if (isAdmin && ["P0001", "23505", "23514"].includes(error.code)) {
+            logger.error("LGU decision rejected by database rule", {
+              code: error.code,
+              message: error.message,
+              constraint: error.constraint,
+              table: error.table,
+              where: error.where,
+            });
+            // P0001 messages are raised by our own SQL functions/triggers
+            // (e.g. "Barangay program allocation is insufficient for award
+            // approval.") and are written to be read by staff, so show them.
+            const reason =
+              error.code === "P0001" && error.message ? error.message : null;
             return res.status(409).json({
-              message:
-                "The award could not be approved because workflow, eligibility, duplicate-funding, or budget requirements were not met.",
+              message: reason
+                ? `The decision could not be saved: ${reason}`
+                : "The award could not be approved because workflow, eligibility, duplicate-funding, or budget requirements were not met.",
             });
           }
           if (["P0001", "23514"].includes(error.code)) {
@@ -4058,8 +4072,8 @@ function createApp({
                                     user_id, action_type, entity_type, entity_id, details
                                  ) VALUES ($1, $2, $3, $4,
                                            jsonb_build_object(
-                                               'application_id', $5,
-                                               'school_id', $6
+                                               'application_id', $5::INTEGER,
+                                               'school_id', $6::INTEGER
                                            ))`,
                 [
                   req.auth.userId,
@@ -5046,6 +5060,11 @@ function createApp({
       code: error.code,
       name: error.name,
       message: error.message,
+      detail: error.detail,
+      where: error.where,
+      constraint: error.constraint,
+      table: error.table,
+      column: error.column,
     });
     return res.status(500).json({ message: "An internal error occurred." });
   });
