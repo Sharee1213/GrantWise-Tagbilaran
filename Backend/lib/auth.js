@@ -28,21 +28,21 @@ function verifyHashMatch(candidateToken, expectedHashHex) {
   }
 }
 
-function setSessionCookie(res, sessionCookieName, token, secure, durationMs) {
+function setSessionCookie(res, sessionCookieName, token, secure, durationMs, sameSite = process.env.COOKIE_SAME_SITE || (secure ? "none" : "strict")) {
   res.cookie(sessionCookieName, token, {
     httpOnly: true,
     secure,
-    sameSite: "strict",
+    sameSite,
     path: "/api",
     maxAge: durationMs,
   });
 }
 
-function clearSessionCookie(res, sessionCookieName, secure) {
+function clearSessionCookie(res, sessionCookieName, secure, sameSite = process.env.COOKIE_SAME_SITE || (secure ? "none" : "strict")) {
   res.clearCookie(sessionCookieName, {
     httpOnly: true,
     secure,
-    sameSite: "strict",
+    sameSite,
     path: "/api",
   });
 }

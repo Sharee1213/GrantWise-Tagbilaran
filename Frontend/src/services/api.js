@@ -1,8 +1,12 @@
-const configuredBaseUrl = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000"
-).replace(/\/+$/, "");
+const rawBaseUrl =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "https://grantwise-tagbilaran.onrender.com";
 
-export const API_BASE_URL = `${configuredBaseUrl.replace(/(?:\/api)+$/i, "")}/api`;
+const cleanedBaseUrl = String(rawBaseUrl).trim().replace(/\/+$/, "");
+const originUrl = cleanedBaseUrl.replace(/(?:\/api)+$/i, "");
+
+export const API_BASE_URL = `${originUrl}/api`;
 
 export class ApiError extends Error {
   constructor(message, status, payload, fieldErrors = []) {
@@ -64,11 +68,14 @@ async function requestJson(url, options = {}) {
 }
 
 export async function apiRequest(path, options = {}) {
-  const normalizedPath = path.replace(/^\/+/, "").replace(/^(?:api\/)+/i, "");
+  const normalizedPath = String(path || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/^(?:api\/)+/i, "");
   return requestJson(`${API_BASE_URL}/${normalizedPath}`, options);
 }
 
 export async function getApiHealth() {
-  const apiOrigin = API_BASE_URL.replace(/\/api\/?$/, "");
+  const apiOrigin = API_BASE_URL.replace(/(?:\/api)+\/?$/i, "");
   return requestJson(`${apiOrigin}/`);
 }

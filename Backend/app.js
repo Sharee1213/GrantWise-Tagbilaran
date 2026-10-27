@@ -943,18 +943,31 @@ const studentEmailResendSchema = z
   })
   .strict();
 
-function getAllowedOrigins(env) {
+const DEFAULT_ALLOWED_ORIGINS = Object.freeze([
+  "https://grant-wise-tagbilaran.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+]);
+
+function getAllowedOrigins(env = process.env) {
   const configured = env.FRONTEND_ORIGINS || env.FRONTEND_ORIGIN;
-  const values = configured
+  const configuredList = configured
     ? configured
         .split(",")
         .map((origin) => origin.trim())
         .filter(Boolean)
-    : env.NODE_ENV === "production"
-      ? []
-      : ["http://localhost:5173"];
+    : [];
 
-  return new Set(values.map((origin) => new URL(origin).origin));
+  const combined = [...DEFAULT_ALLOWED_ORIGINS, ...configuredList];
+  const originSet = new Set();
+  for (const raw of combined) {
+    try {
+      originSet.add(new URL(raw).origin);
+    } catch {
+      originSet.add(raw.replace(/\/+$/, ""));
+    }
+  }
+  return originSet;
 }
 
 async function getSchemaCapabilities(pool) {
@@ -1107,13 +1120,26 @@ function createApp({
     (env.NODE_ENV === "test" && enableTestRegistration);
 
   app.disable("x-powered-by");
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    }),
+  );
   app.use(
     cors({
-      credentials: true,
       origin(origin, callback) {
         callback(null, !origin || allowedOrigins.has(origin));
       },
+      credentials: true,
+      methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+      ],
+      optionsSuccessStatus: 204,
     }),
   );
   app.use(express.json({ limit: "32kb", strict: true }));
