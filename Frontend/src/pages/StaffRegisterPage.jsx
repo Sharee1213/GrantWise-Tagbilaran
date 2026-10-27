@@ -86,8 +86,13 @@ function validateStaffRegistrationForm(form) {
   }
 
   if (phoneNumber) {
-    if (phoneNumber.length > 30 || !PHONE_PATTERN.test(phoneNumber)) {
-      errors.phoneNumber = "Enter a valid phone number (for example, 0917 123 4567).";
+    const cleaned = phoneNumber.replace(/[\s-]/g, "");
+    if (!/^[\d\s-]+$/.test(phoneNumber)) {
+      errors.phoneNumber = "Phone number must contain only numbers.";
+    } else if (cleaned.length !== 11) {
+      errors.phoneNumber = "Phone number must be exactly 11 digits (e.g., 09171234567).";
+    } else if (!cleaned.startsWith("09")) {
+      errors.phoneNumber = "Phone number must start with 09 (e.g., 09171234567).";
     }
   }
 
@@ -248,7 +253,7 @@ export default function StaffRegisterPage() {
           lastName: form.lastName.trim(),
           email: normalizedEmail,
           invitationToken: form.invitationToken.trim(),
-          phoneNumber: form.phoneNumber.trim() || null,
+          phoneNumber: form.phoneNumber.trim() ? form.phoneNumber.replace(/[\s-]/g, "") : null,
           password: form.password,
           confirmPassword: form.confirmPassword,
         }),

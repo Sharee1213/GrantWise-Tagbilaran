@@ -10,6 +10,7 @@ import {
   GraduationCap,
   KeyRound,
   MailCheck,
+  PartyPopper,
   RefreshCw,
   School,
   Send,
@@ -392,6 +393,79 @@ export default function StudentPortalPage() {
             />
           </div>
 
+          {/* HIGHLIGHTED BANNER CARD: READY TO CLAIM AT BARANGAY HALL */}
+          {applications.some((app) => app.application_status === "approved") && (
+            <div className="mb-6 overflow-hidden rounded-2xl border-2 border-emerald-500/50 bg-gradient-to-br from-emerald-50/90 via-teal-50/50 to-emerald-100/60 p-6 shadow-sm dark:border-emerald-500/40 dark:from-emerald-950/60 dark:via-emerald-900/30 dark:to-teal-950/40">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-md shadow-emerald-600/25">
+                  <PartyPopper className="h-6 w-6" />
+                </div>
+                <div className="flex-1">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200 mb-2">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Scholarship Granted — Ready to Claim
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-950 dark:text-white">
+                    Congratulations, {profile?.first_name || currentUser?.firstName || "Scholar"}!
+                  </h3>
+                  <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">
+                    Your scholarship application has been officially approved by the Tagbilaran City LGU. Your grant is now released and ready for claiming at your designated barangay office.
+                  </p>
+
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-start gap-3 rounded-xl border border-emerald-200/80 bg-white/90 p-3.5 shadow-xs dark:border-emerald-800/60 dark:bg-gray-800/90">
+                      <Building2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Claim Location
+                        </span>
+                        <span className="font-bold text-gray-900 dark:text-white text-sm">
+                          Brgy. {applications.find((a) => a.application_status === "approved")?.barangay_name || profile?.barangay_name || "Manga"} Hall / Office
+                        </span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                          Barangay Education &amp; Scholarship Desk
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 rounded-xl border border-emerald-200/80 bg-white/90 p-3.5 shadow-xs dark:border-emerald-800/60 dark:bg-gray-800/90">
+                      <FileCheck className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                          Claim Requirements
+                        </span>
+                        <span className="block text-xs leading-relaxed text-gray-800 dark:text-gray-200 mt-0.5">
+                          Please bring your <strong>valid student ID</strong> and <strong>certificate of enrollment (COR)</strong> to your Barangay Hall to claim your educational assistance.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* List of approved applications with amounts */}
+                  <div className="mt-4 space-y-2">
+                    {applications
+                      .filter((a) => a.application_status === "approved")
+                      .map((app) => (
+                        <div
+                          key={app.application_id}
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-100/60 px-3.5 py-2 text-xs text-emerald-950 dark:border-emerald-800/60 dark:bg-emerald-900/40 dark:text-emerald-100"
+                        >
+                          <div className="font-medium">
+                            <strong>{app.program_name}</strong> (App #{app.application_id})
+                          </div>
+                          {app.award_amount && (
+                            <div className="font-bold text-emerald-700 dark:text-emerald-300">
+                              Grant Amount: ₱{Number(app.award_amount).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* SECTION: MY APPLICATIONS */}
           <section className="staff-panel" id="overview">
             <div className="panel-title-bar">
@@ -462,6 +536,27 @@ export default function StudentPortalPage() {
                           </button>
                         </div>
                       </div>
+
+                      {/* Approved & Ready to Claim Callout */}
+                      {app.application_status === "approved" && (
+                        <div className="mt-3 mb-4 rounded-xl border border-emerald-300 bg-emerald-50/90 p-4 dark:border-emerald-800/70 dark:bg-emerald-950/40">
+                          <div className="flex items-start gap-3">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                            <div className="text-xs text-emerald-900 dark:text-emerald-200 space-y-1">
+                              <div className="font-bold text-sm text-emerald-950 dark:text-emerald-100">
+                                Grant Approved — Ready to Claim
+                              </div>
+                              <p className="leading-relaxed">
+                                Your educational assistance grant has been approved and is ready to claim at{" "}
+                                <strong>Brgy. {app.barangay_name || profile?.barangay_name} Hall/Office</strong>.
+                              </p>
+                              <p className="inline-block rounded-md bg-white/80 dark:bg-emerald-900/60 px-2.5 py-1.5 font-medium border border-emerald-200/60 dark:border-emerald-800/50">
+                                📋 <strong>Required Documents to Bring:</strong> Please present your <u>valid student ID</u> and <u>certificate of enrollment (COR)</u> upon claiming.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Visual Timeline Stepper */}
                       <ApplicationTimeline

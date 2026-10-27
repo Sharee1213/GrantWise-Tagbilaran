@@ -37,6 +37,26 @@ const DISALLOWED_STUDENT_CONSUMER_DOMAINS = new Set([
   "gmx.com",
 ]);
 
+const APPROVED_SCHOOL_DOMAINS = new Set([
+  "hnu.edu.ph",
+  "holyname.edu.ph",
+  "holynameuniversity.edu.ph",
+  "bisu.edu.ph",
+  "boholislandstateuniv.edu.ph",
+  "boholislandstateuniversity.edu.ph",
+  "universityofbohol.edu.ph",
+  "universityofbohol.ph",
+  "ub.edu.ph",
+  "tagbilarancitycollege.edu.ph",
+  "tcc.edu.ph",
+  "pmi-coleges.edu.ph",
+  "pmi-colleges.edu.ph",
+  "pmicollegesbohol.edu.ph",
+  "pmi-bohol.edu.ph",
+  "pmicolleges.edu.ph",
+  "pmi.edu.ph",
+]);
+
 export function isAllowedStudentEmail(email) {
   const normalized = String(email || "").trim().toLowerCase();
   if (!EMAIL_PATTERN.test(normalized) || /[<>",;\\]/.test(normalized)) {
@@ -52,6 +72,9 @@ export function isAllowedStudentEmail(email) {
     domain.endsWith(".gov")
   ) {
     return false;
+  }
+  if (APPROVED_SCHOOL_DOMAINS.has(domain)) {
+    return true;
   }
   return (
     (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
@@ -100,7 +123,7 @@ function validateRegistrationForm(form) {
     errors.email = "Enter a valid email address (for example, name@gmail.com or name@school.edu.ph).";
   } else if (!isAllowedStudentEmail(email)) {
     errors.email =
-      "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address.";
+      "Students must register using a personal Gmail (@gmail.com) or an official school email (@hnu.edu.ph, @universityofbohol.edu.ph, @universityofbohol.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph, @pmi-coleges.edu.ph).";
   }
 
   const passwordError = getNewPasswordError(form.password);
@@ -113,8 +136,13 @@ function validateRegistrationForm(form) {
   }
 
   if (phoneNumber) {
-    if (phoneNumber.length > 30 || !PHONE_PATTERN.test(phoneNumber)) {
-      errors.phoneNumber = "Enter a valid phone number (for example, 0917 123 4567).";
+    const cleaned = phoneNumber.replace(/[\s-]/g, "");
+    if (!/^[\d\s-]+$/.test(phoneNumber)) {
+      errors.phoneNumber = "Phone number must contain only numbers.";
+    } else if (cleaned.length !== 11) {
+      errors.phoneNumber = "Phone number must be exactly 11 digits (e.g., 09171234567).";
+    } else if (!cleaned.startsWith("09")) {
+      errors.phoneNumber = "Phone number must start with 09 (e.g., 09171234567).";
     }
   }
 
@@ -259,7 +287,7 @@ export default function SignUpPage() {
           email: normalizedEmail,
           password: form.password,
           confirmPassword: form.confirmPassword,
-          phoneNumber: form.phoneNumber.trim() || null,
+          phoneNumber: form.phoneNumber.trim() ? form.phoneNumber.replace(/[\s-]/g, "") : null,
           barangayId: Number(form.barangayId),
           schoolId: Number(form.schoolId),
           studentNumber: form.studentNumber.trim(),
@@ -384,7 +412,7 @@ export default function SignUpPage() {
                 required
               />
               <p id="signup-email-hint" className="field-hint">
-                Personal Gmail (<code>@gmail.com</code>) or official school-issued email required.
+                Accepted: personal Gmail (<code>@gmail.com</code>) or official school email (<code>@hnu.edu.ph</code>, <code>@universityofbohol.edu.ph</code>, <code>@bisu.edu.ph</code>, <code>@tagbilarancitycollege.edu.ph</code>, <code>@pmicollegesbohol.edu.ph</code>, <code>@pmi-coleges.edu.ph</code>).
               </p>
               {getFieldError("email") && (
                 <p role="alert" className="field-error">
@@ -398,21 +426,26 @@ export default function SignUpPage() {
                 <label className="form-label" htmlFor="signup-phoneNumber">
                   Phone number
                 </label>
-                <span className="form-label-meta">Optional</span>
+                <span className="form-label-meta">Optional · 11 digits</span>
               </div>
               <input
                 id="signup-phoneNumber"
                 className={`form-input ${getFieldError("phoneNumber") ? "form-input-error" : ""}`}
                 name="phoneNumber"
                 type="tel"
-                placeholder="0917 123 4567"
+                placeholder="09171234567"
+                maxLength={13}
                 value={form.phoneNumber}
                 onChange={handleChange}
                 onBlur={handleBlur}
                 autoComplete="tel"
                 aria-invalid={Boolean(getFieldError("phoneNumber"))}
+                aria-describedby="signup-phone-hint"
                 disabled={loading}
               />
+              <p id="signup-phone-hint" className="field-hint">
+                Must be exactly 11 digits starting with 09 (e.g. 09171234567).
+              </p>
               {getFieldError("phoneNumber") && (
                 <p role="alert" className="field-error">
                   {getFieldError("phoneNumber")}

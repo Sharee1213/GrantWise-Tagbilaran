@@ -162,7 +162,8 @@ class FakePool {
                     has_program_budget_balances: relationalSchema,
                     has_award_approval_function: relationalSchema,
                     has_staff_admin_workflow: relationalSchema,
-                    has_staff_authorizations: this.hasStaffAuthorizations === true
+                    has_staff_authorizations: this.hasStaffAuthorizations === true,
+                    has_notifications_table: true
                 }]
             };
         }
@@ -293,6 +294,10 @@ class FakePool {
 
         if (sql.startsWith('SELECT 1 FROM "Schools"')) {
             return { rowCount: 1, rows: [{}] };
+        }
+
+        if (sql.startsWith('SELECT domain FROM "School_Email_Domains"')) {
+            return { rowCount: 0, rows: [] };
         }
 
         if (sql.startsWith('SELECT role_id FROM "Roles"')) {
@@ -705,6 +710,19 @@ class StaffPortalPool extends FakePool {
             }
             this.approvedAwardValues = values;
             return { rowCount: 1, rows: [{}] };
+        }
+        if (sql.includes('FROM "Applications" application') && sql.includes('student.user_id')) {
+            return {
+                rowCount: 1,
+                rows: [{
+                    user_id: 101,
+                    program_name: "Fixture Program",
+                    barangay_name: "Manga"
+                }]
+            };
+        }
+        if (sql.startsWith('INSERT INTO "Notifications"')) {
+            return { rowCount: 1, rows: [] };
         }
         if (sql.startsWith('INSERT INTO "Audit_Logs"')) {
             return { rowCount: 1, rows: [] };
@@ -2540,13 +2558,14 @@ class StaffAuthStatefulPool {
                     has_school_email_domains: true,
                     has_email_verification_tokens: true,
                     has_user_email_verified_at: true,
-                    has_lgu_admin_permissions: true
+                    has_lgu_admin_permissions: true,
+                    has_notifications_table: true
                 }]
             };
         }
 
         // Lookups
-        if (sql.startsWith('SELECT funding_unit_id, funding_unit_code, funding_unit_name, status FROM "Funding_Units"')) {
+        if (sql.includes('FROM "Funding_Units"') && !sql.includes('WHERE funding_unit_id = $1')) {
             const rows = [...this.fundingUnits.values()];
             return { rowCount: rows.length, rows };
         }

@@ -326,6 +326,10 @@ CREATE TABLE IF NOT EXISTS "Scholarship_Awards" (
     approved_by INTEGER REFERENCES "Users"(user_id),
     award_date DATE NOT NULL DEFAULT CURRENT_DATE,
     notes TEXT,
+    claim_status VARCHAR(30) NOT NULL DEFAULT 'unclaimed',
+    claimed_at TIMESTAMPTZ,
+    claimed_by INTEGER REFERENCES "Users"(user_id),
+    claim_notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

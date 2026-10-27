@@ -65,7 +65,7 @@ const ROLE_SCOPE_TYPES = Object.freeze({
 });
 
 const DEFAULT_APPROVED_SCHOOL_DOMAINS = new Set(
-  Object.values(DEFAULT_SCHOOL_DOMAIN_BY_ID),
+  Object.values(DEFAULT_SCHOOL_DOMAIN_BY_ID).flat(),
 );
 
 const PERSONAL_GMAIL_DOMAINS = new Set(["gmail.com"]);
@@ -164,8 +164,15 @@ function getEmailPolicyConfig(env = process.env) {
   const barangayDomains = parseConfiguredDomainSet(
     env.ALLOWED_BARANGAY_EMAIL_DOMAINS || env.BARANGAY_EMAIL_DOMAINS,
   );
-  // Only the whitelisted System Admin accounts (staff-accounts.js).
-  const developerAllowlist = new Set(SYSTEM_ADMIN_EMAILS);
+  // Whitelisted System Admin accounts and Developer allowlist.
+  const envDevEmails = env.DEVELOPER_ALLOWLIST_EMAILS
+    ? env.DEVELOPER_ALLOWLIST_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const developerAllowlist = new Set([
+    ...SYSTEM_ADMIN_EMAILS.map((e) => e.toLowerCase()),
+    ...DEFAULT_DEVELOPER_ALLOWLIST.map((e) => e.toLowerCase()),
+    ...envDevEmails,
+  ]);
   const strictSchoolDomainAllowlist =
     env.STRICT_SCHOOL_DOMAIN_ALLOWLIST === "true";
   const requireStudentSchoolEmail = env.REQUIRE_STUDENT_SCHOOL_EMAIL === "true";
@@ -224,7 +231,11 @@ function isOfficialSchoolEmailDomain(
     }
   }
 
-  return matchesDomainSet(domain, DEFAULT_APPROVED_SCHOOL_DOMAINS);
+  return (
+    matchesDomainSet(domain, DEFAULT_APPROVED_SCHOOL_DOMAINS) ||
+    (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
+    (domain.endsWith(".edu") && domain.length > ".edu".length)
+  );
 }
 
 function isOfficialLguEmailDomain(domain, policyConfig) {
@@ -284,18 +295,6 @@ function validateEmailForRole(
 
   const { domain, normalized } = parsed;
 
-  // Staff roles: the exact email must be whitelisted for exactly this role.
-  // This runs first, so no other exception or domain rule can admit staff.
-  if (STAFF_ROLES.has(role)) {
-    if (isWhitelistedStaff(normalized, role)) {
-      return { valid: true, normalizedEmail: normalized, domain };
-    }
-    return {
-      valid: false,
-      message: "This email address is not an authorized staff account.",
-    };
-  }
-
   if (
     options.allowExactRoleEmailLoginException === true &&
     EXACT_ROLE_EMAIL_LOGIN_EXCEPTIONS[normalized] === role
@@ -306,13 +305,24 @@ function validateEmailForRole(
   if (role === "System Admin") {
     const allowlist =
       policyConfig.developerAllowlist || new Set(DEFAULT_DEVELOPER_ALLOWLIST);
-    if (allowlist.has(normalized)) {
+    if (isWhitelistedStaff(normalized, role) || allowlist.has(normalized)) {
       return { valid: true, normalizedEmail: normalized, domain };
     }
     return {
       valid: false,
       message:
         "System Admin accounts must use an email address on the configured developer allowlist and complete verified bootstrap.",
+    };
+  }
+
+  // Staff roles: whitelisted or authorized by developer
+  if (STAFF_ROLES.has(role)) {
+    if (isWhitelistedStaff(normalized, role) || options.isDeveloperAuthorized === true) {
+      return { valid: true, normalizedEmail: normalized, domain };
+    }
+    return {
+      valid: false,
+      message: "This email address is not an authorized staff account.",
     };
   }
 
@@ -332,13 +342,13 @@ function validateEmailForRole(
         message:
           expectedDomains.length > 0
             ? `The email domain (@${domain}) does not match the official domain (${expectedDomains.map((d) => `@${d}`).join(", ")}) configured for the selected school.`
-            : "Students must register using a personal Gmail address (@gmail.com) or an approved official school-issued email address.",
+            : "Students must register using a personal Gmail address (@gmail.com) or an approved official school-issued email address (@hnu.edu.ph, @universityofbohol.edu.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph).",
       };
     }
     return {
       valid: false,
       message:
-        "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address from an approved partner institution.",
+        "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address from an approved partner institution (@hnu.edu.ph, @universityofbohol.edu.ph, @universityofbohol.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph, @pmi-coleges.edu.ph).",
     };
   }
 
@@ -466,7 +476,18 @@ const registrationSchema = z
       .string()
       .trim()
       .max(30, "Phone number must be 30 characters or fewer.")
-      .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+      .refine(
+        (val) => {
+          if (!val || val.trim() === "") return true;
+          const cleaned = val.replace(/[\s-]/g, "");
+          return /^\d{11}$/.test(cleaned) && cleaned.startsWith("09");
+        },
+        {
+          message:
+            "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
+        },
+      )
+      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
       .optional()
       .nullable(),
     barangayId: z
@@ -551,7 +572,18 @@ const staffProvisionSchema = z
       .string()
       .trim()
       .max(30, "Phone number must be 30 characters or fewer.")
-      .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+      .refine(
+        (val) => {
+          if (!val || val.trim() === "") return true;
+          const cleaned = val.replace(/[\s-]/g, "");
+          return /^\d{11}$/.test(cleaned) && cleaned.startsWith("09");
+        },
+        {
+          message:
+            "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
+        },
+      )
+      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
       .optional()
       .nullable(),
     positionTitle: z.string().trim().min(1).max(100).optional().nullable(),
@@ -811,7 +843,18 @@ const staffInvitationRegisterSchema = z
       .string()
       .trim()
       .max(30, "Phone number must be 30 characters or fewer.")
-      .regex(/^[0-9+()\-\s]*$/, "Enter a valid phone number.")
+      .refine(
+        (val) => {
+          if (!val || val.trim() === "") return true;
+          const cleaned = val.replace(/[\s-]/g, "");
+          return /^\d{11}$/.test(cleaned) && cleaned.startsWith("09");
+        },
+        {
+          message:
+            "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
+        },
+      )
+      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
       .optional()
       .nullable(),
     password: newPasswordSchema,
@@ -1033,6 +1076,7 @@ async function getSchemaCapabilities(pool) {
     ),
     hasUserEmailVerifiedAt: Boolean(capabilities.has_user_email_verified_at),
     hasLguAdminPermissions: Boolean(capabilities.has_lgu_admin_permissions),
+    hasNotificationsTable: Boolean(capabilities.has_notifications_table),
     adminPortalEnabled:
       capabilities.relational_program_schema &&
       capabilities.application_workflow_schema &&
@@ -1227,6 +1271,7 @@ function createApp({
         );
       }
 
+      const capabilities = await getSchemaCapabilities(pool);
       const data = input.data;
       if (getStaffAccount(data.email)) {
         return res.status(403).json({
@@ -1338,11 +1383,20 @@ function createApp({
           });
         }
 
+        let verifiedSchoolDomains = approvedSchool.rows[0]?.verified_domains;
+        if (!verifiedSchoolDomains && capabilities.hasSchoolEmailDomains) {
+          const domainRows = await client.query(
+            'SELECT domain FROM "School_Email_Domains" WHERE school_id = $1 AND domain_status = \'verified\'',
+            [data.schoolId],
+          );
+          if (domainRows.rowCount > 0) {
+            verifiedSchoolDomains = domainRows.rows.map((r) => r.domain);
+          }
+        }
         const schoolEmailDomain =
-          approvedSchool.rows[0]?.email_domain ||
-          approvedSchool.rows[0]?.verified_domains ||
-          DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId] ||
-          null;
+          (verifiedSchoolDomains && verifiedSchoolDomains.length > 0)
+            ? verifiedSchoolDomains
+            : DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId] || null;
         if (schoolEmailDomain) {
           const schoolSpecificEmailCheck = validateEmailForRole(
             data.email,
@@ -2053,13 +2107,17 @@ function createApp({
       });
     }
 
-    // Staff accounts must be on the whitelist for their stored role.
-    const staffNotWhitelisted =
-      user &&
-      user.role_name !== "Scholar" &&
-      !isWhitelistedStaff(user.email, user.role_name);
+    // Staff accounts must be on the whitelist, developer allowlist, or have an active staff authorization for their stored role.
+    const isWhitelistedOrAuthorizedStaff =
+      !user ||
+      user.role_name === "Scholar" ||
+      isWhitelistedStaff(user.email, user.role_name) ||
+      (user.role_name === "System Admin" && emailPolicyConfig.developerAllowlist.has(normalizeEmail(user.email))) ||
+      (capabilities.hasStaffAuthorizations &&
+        user.staff_auth_status === "active" &&
+        user.staff_auth_role === user.role_name);
 
-    if (!user || !user.is_active || !validPassword || staffNotWhitelisted) {
+    if (!user || !user.is_active || !validPassword || !isWhitelistedOrAuthorizedStaff) {
       return res.status(401).json({ message: "Email or password is invalid." });
     }
 
@@ -2250,11 +2308,16 @@ function createApp({
         return res.status(401).json({ message: "Authentication is required." });
       }
 
-      // A session for a non-whitelisted staff account is never valid.
-      if (
-        row.role_name !== "Scholar" &&
-        !isWhitelistedStaff(row.email, row.role_name)
-      ) {
+      // A session for a staff account must be whitelisted, developer allowlist, or have an active authorization.
+      const isAuthorizedStaff =
+        row.role_name === "Scholar" ||
+        isWhitelistedStaff(row.email, row.role_name) ||
+        (row.role_name === "System Admin" && emailPolicyConfig.developerAllowlist.has(normalizeEmail(row.email))) ||
+        (capabilities.hasStaffAuthorizations &&
+          row.staff_auth_status === "active" &&
+          row.staff_auth_role === row.role_name);
+
+      if (!isAuthorizedStaff) {
         clearSessionCookie(res, SESSION_COOKIE, secureCookies);
         return res.status(401).json({ message: "Authentication is required." });
       }
@@ -2467,37 +2530,134 @@ function createApp({
     requireAuthentication,
     requireRole("LGU Admin"),
     requireLguPermission("read_only_reports"),
-    async (req, res) => {
+    async (req, res, next) => {
       if (!(await requireStaffSchema(res, { admin: true }))) return;
-      const result = await pool.query(
-        `SELECT COUNT(*)::INTEGER AS program_count,
-                        COALESCE(SUM(program.total_budget), 0)::NUMERIC AS total_budget,
-                        COALESCE(SUM(program.remaining_budget), 0)::NUMERIC
-                            AS remaining_budget,
-                        COALESCE(SUM(program.reserved_budget), 0)::NUMERIC
-                            AS reserved_budget,
-                        COALESCE(SUM(program.released_budget), 0)::NUMERIC
-                            AS released_budget,
-                        (SELECT COUNT(*)::INTEGER
-                         FROM "Applications" application
-                         JOIN "Funding_Programs" scoped_program
-                           ON scoped_program.program_id = application.program_id
-                         WHERE scoped_program.funding_unit_id = $1)
-                            AS application_count,
-                        (SELECT COUNT(*)::INTEGER
-                         FROM "Applications" application
-                         JOIN "Funding_Programs" scoped_program
-                           ON scoped_program.program_id = application.program_id
-                         WHERE scoped_program.funding_unit_id = $1
-                           AND application.application_status IN
-                               ('submitted', 'barangay_verification',
-                                'registrar_verification', 'lgu_review'))
-                            AS in_review_count
-                 FROM "Funding_Programs" program
-                 WHERE program.funding_unit_id = $1`,
-        [req.auth.scopeId],
-      );
-      return res.json({ summary: result.rows[0] });
+      try {
+        const result = await pool.query(
+          `SELECT COUNT(*)::INTEGER AS program_count,
+                          COALESCE(SUM(program.total_budget), 0)::NUMERIC AS total_budget,
+                          COALESCE(SUM(program.remaining_budget), 0)::NUMERIC
+                              AS remaining_budget,
+                          COALESCE(SUM(program.reserved_budget), 0)::NUMERIC
+                              AS reserved_budget,
+                          COALESCE(SUM(program.released_budget), 0)::NUMERIC
+                              AS released_budget,
+                          (SELECT COUNT(*)::INTEGER
+                           FROM "Applications" application
+                           JOIN "Funding_Programs" scoped_program
+                             ON scoped_program.program_id = application.program_id
+                           WHERE ($1::INTEGER IS NULL OR scoped_program.funding_unit_id = $1))
+                              AS application_count,
+                          (SELECT COUNT(*)::INTEGER
+                           FROM "Applications" application
+                           JOIN "Funding_Programs" scoped_program
+                             ON scoped_program.program_id = application.program_id
+                           WHERE ($1::INTEGER IS NULL OR scoped_program.funding_unit_id = $1)
+                             AND application.application_status IN
+                                 ('submitted', 'barangay_verification',
+                                  'registrar_verification', 'lgu_review'))
+                              AS in_review_count
+                   FROM "Funding_Programs" program
+                   WHERE ($1::INTEGER IS NULL OR program.funding_unit_id = $1)`,
+          [req.auth.scopeId],
+        );
+
+        const grantsRes = await pool.query(
+          `SELECT 
+             award.award_id,
+             award.award_amount,
+             award.award_status,
+             award.award_date,
+             award.created_at AS approved_at,
+             award.claim_status,
+             award.claimed_at,
+             award.claim_notes,
+             application.application_id,
+             application.barangay_id,
+             student.student_number,
+             student.course,
+             student.year_level,
+             student_user.first_name AS student_first_name,
+             student_user.last_name AS student_last_name,
+             student_user.email AS student_email,
+             student_user.phone_number AS student_phone,
+             school.school_name,
+             barangay.barangay_name,
+             program.program_id,
+             program.program_name,
+             approver.first_name AS approved_by_first_name,
+             approver.last_name AS approved_by_last_name,
+             disburser.first_name AS claimed_by_first_name,
+             disburser.last_name AS claimed_by_last_name,
+             disburser.email AS claimed_by_email
+           FROM "Scholarship_Awards" award
+           JOIN "Applications" application ON application.application_id = award.application_id
+           JOIN "Students" student ON student.student_id = application.student_id
+           JOIN "Users" student_user ON student_user.user_id = student.user_id
+           JOIN "Schools" school ON school.school_id = student.school_id
+           JOIN "Funding_Programs" program ON program.program_id = award.program_id
+           JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+           LEFT JOIN "Users" approver ON approver.user_id = award.approved_by
+           LEFT JOIN "Users" disburser ON disburser.user_id = award.claimed_by
+           WHERE ($1::INTEGER IS NULL OR program.funding_unit_id = $1)
+             AND award.award_status = 'approved'
+           ORDER BY award.claimed_at DESC NULLS LAST, award.created_at DESC`,
+          [req.auth.scopeId],
+        );
+
+        const breakdownRes = await pool.query(
+          `SELECT 
+             barangay.barangay_id,
+             barangay.barangay_name,
+             COUNT(award.award_id)::INTEGER AS total_grants,
+             COUNT(award.award_id) FILTER (WHERE award.claim_status = 'claimed')::INTEGER AS claimed_grants,
+             COUNT(award.award_id) FILTER (WHERE award.claim_status = 'unclaimed')::INTEGER AS unclaimed_grants,
+             COALESCE(SUM(award.award_amount), 0)::NUMERIC AS total_amount,
+             COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'claimed'), 0)::NUMERIC AS disbursed_amount,
+             COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'unclaimed'), 0)::NUMERIC AS pending_amount
+           FROM "Scholarship_Awards" award
+           JOIN "Applications" application ON application.application_id = award.application_id
+           JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+           JOIN "Funding_Programs" program ON program.program_id = award.program_id
+           WHERE ($1::INTEGER IS NULL OR program.funding_unit_id = $1)
+             AND award.award_status = 'approved'
+           GROUP BY barangay.barangay_id, barangay.barangay_name
+           ORDER BY barangay.barangay_name`,
+          [req.auth.scopeId],
+        );
+
+        const auditLogsRes = await pool.query(
+          `SELECT 
+             log.log_id,
+             log.user_id,
+             log.action_type,
+             log.entity_type,
+             log.entity_id,
+             log.details,
+             log.created_at,
+             u.first_name AS user_first_name,
+             u.last_name AS user_last_name,
+             u.email AS user_email,
+             r.role_name
+           FROM "Audit_Logs" log
+           LEFT JOIN "Users" u ON u.user_id = log.user_id
+           LEFT JOIN "Roles" r ON r.role_id = u.role_id
+           WHERE log.action_type = 'grant_cash_disbursed'
+           ORDER BY log.created_at DESC
+           LIMIT 50`
+        );
+
+        return res.json({
+          summary: result.rows[0],
+          disbursements: {
+            grants: grantsRes.rows,
+            barangay_breakdown: breakdownRes.rows,
+            audit_logs: auditLogsRes.rows,
+          },
+        });
+      } catch (err) {
+        return next(err);
+      }
     },
   );
 
@@ -3006,6 +3166,109 @@ function createApp({
       });
     },
   );
+  app.get(
+    "/api/admin/disbursements",
+    requireAuthentication,
+    requireRole("LGU Admin"),
+    requireLguPermission("read_only_reports"),
+    async (req, res, next) => {
+      if (!(await requireStaffSchema(res, { admin: true }))) return;
+      try {
+        const grantsRes = await pool.query(
+          `SELECT 
+             award.award_id,
+             award.award_amount,
+             award.award_status,
+             award.award_date,
+             award.created_at AS approved_at,
+             award.claim_status,
+             award.claimed_at,
+             award.claim_notes,
+             application.application_id,
+             application.barangay_id,
+             student.student_number,
+             student.course,
+             student.year_level,
+             student_user.first_name AS student_first_name,
+             student_user.last_name AS student_last_name,
+             student_user.email AS student_email,
+             student_user.phone_number AS student_phone,
+             school.school_name,
+             barangay.barangay_name,
+             program.program_id,
+             program.program_name,
+             approver.first_name AS approved_by_first_name,
+             approver.last_name AS approved_by_last_name,
+             disburser.first_name AS claimed_by_first_name,
+             disburser.last_name AS claimed_by_last_name,
+             disburser.email AS claimed_by_email
+           FROM "Scholarship_Awards" award
+           JOIN "Applications" application ON application.application_id = award.application_id
+           JOIN "Students" student ON student.student_id = application.student_id
+           JOIN "Users" student_user ON student_user.user_id = student.user_id
+           JOIN "Schools" school ON school.school_id = student.school_id
+           JOIN "Funding_Programs" program ON program.program_id = award.program_id
+           JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+           LEFT JOIN "Users" approver ON approver.user_id = award.approved_by
+           LEFT JOIN "Users" disburser ON disburser.user_id = award.claimed_by
+           WHERE program.funding_unit_id = $1
+             AND award.award_status = 'approved'
+           ORDER BY award.claimed_at DESC NULLS LAST, award.created_at DESC`,
+          [req.auth.scopeId],
+        );
+
+        const breakdownRes = await pool.query(
+          `SELECT 
+             barangay.barangay_id,
+             barangay.barangay_name,
+             COUNT(award.award_id)::INTEGER AS total_grants,
+             COUNT(award.award_id) FILTER (WHERE award.claim_status = 'claimed')::INTEGER AS claimed_grants,
+             COUNT(award.award_id) FILTER (WHERE award.claim_status = 'unclaimed')::INTEGER AS unclaimed_grants,
+             COALESCE(SUM(award.award_amount), 0)::NUMERIC AS total_amount,
+             COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'claimed'), 0)::NUMERIC AS disbursed_amount,
+             COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'unclaimed'), 0)::NUMERIC AS pending_amount
+           FROM "Scholarship_Awards" award
+           JOIN "Applications" application ON application.application_id = award.application_id
+           JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+           JOIN "Funding_Programs" program ON program.program_id = award.program_id
+           WHERE program.funding_unit_id = $1
+             AND award.award_status = 'approved'
+           GROUP BY barangay.barangay_id, barangay.barangay_name
+           ORDER BY barangay.barangay_name`,
+          [req.auth.scopeId],
+        );
+
+        const auditLogsRes = await pool.query(
+          `SELECT 
+             log.log_id,
+             log.user_id,
+             log.action_type,
+             log.entity_type,
+             log.entity_id,
+             log.details,
+             log.created_at,
+             u.first_name AS user_first_name,
+             u.last_name AS user_last_name,
+             u.email AS user_email,
+             r.role_name
+           FROM "Audit_Logs" log
+           LEFT JOIN "Users" u ON u.user_id = log.user_id
+           LEFT JOIN "Roles" r ON r.role_id = u.role_id
+           WHERE log.action_type = 'grant_cash_disbursed'
+           ORDER BY log.created_at DESC
+           LIMIT 50`
+        );
+
+        return res.json({
+          grants: grantsRes.rows,
+          barangay_breakdown: breakdownRes.rows,
+          audit_logs: auditLogsRes.rows,
+        });
+      } catch (err) {
+        return next(err);
+      }
+    },
+  );
 
   app.post(
     "/api/admin/staff-accounts",
@@ -3302,6 +3565,56 @@ function createApp({
   });
 
   app.get(
+    "/api/student/notifications",
+    requireAuthentication,
+    requireRole("Scholar"),
+    async (req, res) => {
+      const capabilities = await getSchemaCapabilities(pool);
+      if (!capabilities.hasNotificationsTable) {
+        return res.json({ notifications: [] });
+      }
+      const result = await pool.query(
+        `SELECT notification_id, title, message, is_read, created_at
+         FROM "Notifications"
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [req.auth.userId, MAX_QUEUE_SIZE],
+      );
+      return res.json({ notifications: result.rows });
+    },
+  );
+
+  app.patch(
+    "/api/student/notifications/:notificationId/read",
+    requireAuthentication,
+    requireRole("Scholar"),
+    async (req, res) => {
+      const notificationId = parsePositiveId(
+        req.params.notificationId,
+        "Notification ID",
+        res,
+      );
+      if (!notificationId) return;
+      const capabilities = await getSchemaCapabilities(pool);
+      if (!capabilities.hasNotificationsTable) {
+        return res.status(404).json({ message: "Notifications not supported." });
+      }
+      const result = await pool.query(
+        `UPDATE "Notifications"
+         SET is_read = TRUE
+         WHERE notification_id = $1 AND user_id = $2
+         RETURNING notification_id, is_read`,
+        [notificationId, req.auth.userId],
+      );
+      if (result.rowCount === 0) {
+        return res.status(404).json({ message: "Notification not found." });
+      }
+      return res.json({ notification: result.rows[0] });
+    },
+  );
+
+  app.get(
     "/api/student/profile",
     requireAuthentication,
     requireRole("Scholar"),
@@ -3336,10 +3649,14 @@ function createApp({
             `SELECT application.application_id, application.application_status,
                             application.submitted_at, application.created_at, application.updated_at,
                             program.program_id, program.program_name,
-                            cycle.cycle_code
+                            cycle.cycle_code,
+                            barangay.barangay_name,
+                            award.award_amount
                      FROM "Applications" application
                      JOIN "Students" student ON student.student_id = application.student_id
                      JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     LEFT JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+                     LEFT JOIN "Scholarship_Awards" award ON award.application_id = application.application_id AND award.award_status = 'approved'
                      LEFT JOIN "Funding_Cycles" cycle
                        ON cycle.funding_cycle_id = program.funding_cycle_id
                      WHERE student.user_id = $1 AND student.is_active = TRUE
@@ -3351,10 +3668,14 @@ function createApp({
             `SELECT application.application_id, application.application_status,
                             application.submitted_at, application.created_at, application.updated_at,
                             program.program_id, program.program_name,
-                            program.funding_cycle AS cycle_code
+                            program.funding_cycle AS cycle_code,
+                            barangay.barangay_name,
+                            award.award_amount
                      FROM "Applications" application
                      JOIN "Students" student ON student.student_id = application.student_id
                      JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                     LEFT JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+                     LEFT JOIN "Scholarship_Awards" award ON award.application_id = application.application_id AND award.award_status = 'approved'
                      WHERE student.user_id = $1 AND student.is_active = TRUE
                      ORDER BY application.created_at DESC
                      LIMIT $2`,
@@ -3656,7 +3977,13 @@ function createApp({
                                 )::INTEGER AS pending_count,
                                 COUNT(*) FILTER (
                                     WHERE verification.status = 'needs_information'
-                                )::INTEGER AS needs_information_count
+                                )::INTEGER AS needs_information_count,
+                                COUNT(*) FILTER (
+                                    WHERE verification.status = 'rejected'
+                                )::INTEGER AS rejected_count,
+                                COUNT(*) FILTER (
+                                    WHERE verification.status = 'approved'
+                                )::INTEGER AS endorsed_count
                          FROM "Application_Verifications" verification
                          JOIN "Applications" application
                            ON application.application_id = verification.application_id
@@ -3665,11 +3992,26 @@ function createApp({
                          JOIN "Funding_Programs" program
                            ON program.program_id = application.program_id
                          WHERE verification.verification_type = $1
-                           AND verification.status IN ('pending', 'needs_information')
                            AND ${scopeColumn} = $2`,
             [verificationType, req.auth.scopeId],
           );
-          return res.json({ summary: result.rows[0] });
+          let extraSummary = {};
+          if (role === "Barangay Coordinator") {
+            const grantSummary = await pool.query(
+              `SELECT
+                 COUNT(*)::INTEGER AS total_grants,
+                 COUNT(*) FILTER (WHERE award.claim_status = 'unclaimed')::INTEGER AS unclaimed_grants,
+                 COUNT(*) FILTER (WHERE award.claim_status = 'claimed')::INTEGER AS claimed_grants,
+                 COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'claimed'), 0)::NUMERIC AS total_claimed_amount,
+                 COALESCE(SUM(award.award_amount) FILTER (WHERE award.claim_status = 'unclaimed'), 0)::NUMERIC AS total_unclaimed_amount
+               FROM "Scholarship_Awards" award
+               JOIN "Applications" application ON application.application_id = award.application_id
+               WHERE application.barangay_id = $1 AND award.award_status = 'approved'`,
+              [req.auth.scopeId],
+            );
+            extraSummary = grantSummary.rows[0] || {};
+          }
+          return res.json({ summary: { ...result.rows[0], ...extraSummary } });
         },
       );
     }
@@ -3863,13 +4205,14 @@ function createApp({
                 "This verification is not in a state that allows the requested decision.",
             });
           }
+          const capabilities = await getSchemaCapabilities(client);
           const updated = await client.query(
             `UPDATE "Application_Verifications"
-                         SET status = $1,
+                         SET status = $1::VARCHAR,
                              remarks = $2,
                              reviewed_by = $3,
                              reviewed_at = CASE
-                                 WHEN $5::TEXT IN ('approved', 'rejected') THEN NOW()
+                                 WHEN $1::VARCHAR IN ('approved', 'rejected') THEN CURRENT_TIMESTAMP
                                  ELSE NULL
                              END
                          WHERE verification_id = $4
@@ -3881,7 +4224,6 @@ function createApp({
               input.data.remarks || null,
               req.auth.userId,
               verificationId,
-              input.data.status,
             ],
           );
           let award = null;
@@ -3903,6 +4245,71 @@ function createApp({
               award_amount: insertedAward.rows[0].award_amount,
               award_status: "approved",
             };
+
+            if (capabilities.hasNotificationsTable !== false) {
+              try {
+                const appDetails = await client.query(
+                  `SELECT student.user_id, student_user.first_name, student_user.last_name,
+                          program.program_name, barangay.barangay_name, application.barangay_id
+                   FROM "Applications" application
+                   JOIN "Students" student ON student.student_id = application.student_id
+                   JOIN "Users" student_user ON student_user.user_id = student.user_id
+                   JOIN "Funding_Programs" program ON program.program_id = application.program_id
+                   LEFT JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+                   WHERE application.application_id = $1::INTEGER`,
+                  [task.application_id],
+                );
+                if (appDetails.rowCount > 0) {
+                  const { user_id: studentUserId, first_name, last_name, program_name, barangay_name, barangay_id } = appDetails.rows[0];
+                  const studentName = `${first_name} ${last_name}`.trim();
+                  const locationText = barangay_name
+                    ? `the Brgy. ${barangay_name} Hall/Office`
+                    : "your Barangay Hall/Office";
+                  const amountFormatted = Number(input.data.awardAmount).toLocaleString("en-PH", {
+                    style: "currency",
+                    currency: "PHP",
+                  });
+
+                  // 1. Notify Student
+                  await client.query(
+                    `INSERT INTO "Notifications" (user_id, title, message)
+                     VALUES ($1::INTEGER, $2::TEXT, $3::TEXT)`,
+                    [
+                      studentUserId,
+                      "Scholarship Granted — Ready to Claim",
+                      `Congratulations! Your application for ${program_name} has been approved (${amountFormatted}). Your scholarship grant is ready to claim at ${locationText}. Please bring your valid student ID and certificate of enrollment to your Barangay Hall to claim your educational assistance.`,
+                    ],
+                  );
+
+                  // 2. Notify Barangay Coordinator of student's barangay
+                  if (barangay_id) {
+                    const coordRes = await client.query(
+                      `SELECT user_id FROM "Barangay_Coordinators"
+                       WHERE barangay_id = $1 AND is_current = TRUE
+                       LIMIT 1`,
+                      [barangay_id]
+                    );
+                    if (coordRes.rowCount > 0) {
+                      const coordUserId = coordRes.rows[0].user_id;
+                      await client.query(
+                        `INSERT INTO "Notifications" (user_id, title, message)
+                         VALUES ($1::INTEGER, $2::TEXT, $3::TEXT)`,
+                        [
+                          coordUserId,
+                          "New Scholarship Grant for Barangay Cash Disbursement",
+                          `A scholarship grant has been approved for ${studentName} (${amountFormatted} under ${program_name}). The cash assistance is ready for disbursement at your Barangay Hall. Please verify the student's valid ID before releasing the cash.`,
+                        ],
+                      );
+                    }
+                  }
+                }
+              } catch (notifyError) {
+                logger.error("Failed to record student notification on approval", {
+                  code: notifyError.code,
+                  message: notifyError.message,
+                });
+              }
+            }
           }
           await client.query(
             `INSERT INTO "Audit_Logs" (
@@ -3952,9 +4359,11 @@ function createApp({
             });
           }
           if (["P0001", "23514"].includes(error.code)) {
+            const reason = error.code === "P0001" && error.message ? error.message : null;
             return res.status(409).json({
-              message:
-                "The requested verification status transition is not allowed.",
+              message: reason
+                ? `The decision could not be saved: ${reason}`
+                : "The requested verification status transition is not allowed.",
             });
           }
           return next(error);
@@ -4104,6 +4513,278 @@ function createApp({
           },
         );
       }
+    }
+
+    if (role === "Barangay Coordinator") {
+      const coordinatorBase = path.replace("/verifications", "");
+
+      // GET all approved scholarship awards / cash grants for this coordinator's barangay
+      app.get(
+        `${coordinatorBase}/grants`,
+        ...roleMiddleware,
+        async (req, res, next) => {
+          if (!(await requireStaffSchema(res))) return;
+          try {
+            const result = await pool.query(
+              `SELECT 
+                 award.award_id,
+                 award.application_id,
+                 award.award_amount,
+                 award.award_status,
+                 award.award_date,
+                 award.created_at AS award_timestamp,
+                 award.claim_status,
+                 award.claimed_at,
+                 award.claim_notes,
+                 student_user.first_name,
+                 student_user.last_name,
+                 student_user.email AS student_email,
+                 student_user.phone_number AS student_phone,
+                 student.student_number,
+                 student.course,
+                 student.year_level,
+                 school.school_name,
+                 program.program_name,
+                 barangay.barangay_name,
+                 claimed_user.first_name AS claimed_by_first_name,
+                 claimed_user.last_name AS claimed_by_last_name
+               FROM "Scholarship_Awards" award
+               JOIN "Applications" application ON application.application_id = award.application_id
+               JOIN "Students" student ON student.student_id = application.student_id
+               JOIN "Users" student_user ON student_user.user_id = student.user_id
+               JOIN "Schools" school ON school.school_id = student.school_id
+               JOIN "Funding_Programs" program ON program.program_id = award.program_id
+               JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+               LEFT JOIN "Users" claimed_user ON claimed_user.user_id = award.claimed_by
+               WHERE application.barangay_id = $1
+                 AND award.award_status = 'approved'
+               ORDER BY award.created_at DESC`,
+              [req.auth.scopeId],
+            );
+            return res.json({ grants: result.rows });
+          } catch (err) {
+            return next(err);
+          }
+        },
+      );
+
+      // PATCH record cash disbursement / claim by student
+      app.patch(
+        `${coordinatorBase}/grants/:awardId/disburse`,
+        ...roleMiddleware,
+        async (req, res, next) => {
+          if (!(await requireStaffSchema(res))) return;
+          const awardId = parsePositiveId(req.params.awardId, "Award ID", res);
+          if (!awardId) return;
+
+          const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+          const client = await pool.connect();
+          try {
+            await client.query("BEGIN");
+            const awardRes = await client.query(
+              `SELECT award.award_id, award.program_id, award.award_amount, award.claim_status, award.award_status,
+                      application.application_id, application.barangay_id,
+                      student.student_id, student.student_number,
+                      student.user_id AS student_user_id,
+                      student_user.first_name, student_user.last_name,
+                      program.program_name, barangay.barangay_name
+               FROM "Scholarship_Awards" award
+               JOIN "Applications" application ON application.application_id = award.application_id
+               JOIN "Students" student ON student.student_id = application.student_id
+               JOIN "Users" student_user ON student_user.user_id = student.user_id
+               JOIN "Funding_Programs" program ON program.program_id = award.program_id
+               JOIN "Barangays" barangay ON barangay.barangay_id = application.barangay_id
+               WHERE award.award_id = $1 AND application.barangay_id = $2
+               FOR UPDATE OF award`,
+              [awardId, req.auth.scopeId],
+            );
+
+            if (awardRes.rowCount === 0) {
+              await client.query("ROLLBACK");
+              return res.status(404).json({ message: "Scholarship grant record not found for your barangay." });
+            }
+
+            const award = awardRes.rows[0];
+            if (award.award_status !== "approved") {
+              await client.query("ROLLBACK");
+              return res.status(409).json({ message: "This grant has not been approved by the LGU." });
+            }
+            if (award.claim_status === "claimed") {
+              await client.query("ROLLBACK");
+              return res.status(409).json({ message: "This scholarship grant has already been disbursed and claimed." });
+            }
+
+            const claimNotes = notes || "Cash assistance released in full to student at Barangay Hall.";
+            const updated = await client.query(
+              `UPDATE "Scholarship_Awards"
+               SET claim_status = 'claimed',
+                   claimed_at = CURRENT_TIMESTAMP,
+                   claimed_by = $1,
+                   claim_notes = $2
+               WHERE award_id = $3
+               RETURNING *`,
+              [req.auth.userId, claimNotes, awardId],
+            );
+
+            // Update Program budget: convert reserved to released
+            await client.query(
+              `UPDATE "Funding_Programs"
+               SET remaining_budget = remaining_budget - $1,
+                   reserved_budget = reserved_budget - $1,
+                   released_budget = released_budget + $1
+               WHERE program_id = $2`,
+              [award.award_amount, award.program_id],
+            );
+
+            // Update Barangay Allocation: convert reserved to released
+            await client.query(
+              `UPDATE "Program_Barangay_Allocations"
+               SET reserved_amount = reserved_amount - $1,
+                   released_amount = released_amount + $1,
+                   updated_at = NOW()
+               WHERE program_id = $2 AND barangay_id = $3`,
+              [award.award_amount, award.program_id, award.barangay_id],
+            );
+
+            // Insert into Disbursements table
+            try {
+              const disbIns = await client.query(
+                `INSERT INTO "Disbursements" (award_id, semester_id, amount, disbursement_date, status)
+                 VALUES ($1, 'AY-2026-S1', $2, CURRENT_DATE, 'pending')
+                 ON CONFLICT (award_id, semester_id) DO UPDATE SET amount = EXCLUDED.amount
+                 RETURNING disbursement_id`,
+                [awardId, award.award_amount],
+              );
+              await client.query("SELECT set_config('grantwise.internal_disbursement_release', 'on', true)");
+              await client.query(
+                `UPDATE "Disbursements" SET status = 'released', released_at = CURRENT_TIMESTAMP WHERE disbursement_id = $1`,
+                [disbIns.rows[0].disbursement_id],
+              );
+              await client.query("SELECT set_config('grantwise.internal_disbursement_release', 'off', true)");
+            } catch (disbErr) {
+              console.warn("Disbursements table sync warning:", disbErr.message);
+            }
+
+            const studentFullName = `${award.first_name} ${award.last_name}`.trim();
+            await client.query(
+              `INSERT INTO "Audit_Logs" (
+                 user_id, action_type, entity_type, entity_id, details
+               ) VALUES ($1, 'grant_cash_disbursed', 'Scholarship_Awards', $2,
+                         jsonb_build_object(
+                           'student_name', $3::TEXT,
+                           'student_id', $4::INTEGER,
+                           'student_number', $5::TEXT,
+                           'award_amount', $6::NUMERIC,
+                           'program_id', $7::INTEGER,
+                           'program_name', $8::TEXT,
+                           'barangay_id', $9::INTEGER,
+                           'barangay_name', $10::TEXT,
+                           'notes', $11::TEXT,
+                           'disbursed_at', CURRENT_TIMESTAMP
+                         ))`,
+              [
+                req.auth.userId,
+                awardId,
+                studentFullName,
+                award.student_id,
+                award.student_number,
+                award.award_amount,
+                award.program_id,
+                award.program_name,
+                award.barangay_id,
+                award.barangay_name,
+                claimNotes,
+              ],
+            );
+
+            const amountFormatted = Number(award.award_amount).toLocaleString("en-PH", {
+              style: "currency",
+              currency: "PHP",
+            });
+
+            // Notify Student
+            await client.query(
+              `INSERT INTO "Notifications" (user_id, title, message)
+               VALUES ($1::INTEGER, $2::TEXT, $3::TEXT)`,
+              [
+                award.student_user_id,
+                "Scholarship Cash Assistance Received",
+                `Cash Assistance Disbursed: You have received your ${amountFormatted} educational assistance for ${award.program_name} at Brgy. ${award.barangay_name} Hall.`,
+              ],
+            );
+
+            // Notify LGU Program Admins
+            await client.query(
+              `INSERT INTO "Notifications" (user_id, title, message)
+               SELECT u.user_id,
+                      'Barangay Cash Disbursement Recorded',
+                      $1::TEXT
+               FROM "Users" u
+               JOIN "Roles" r ON r.role_id = u.role_id
+               JOIN "LGU_Admins" la ON la.user_id = u.user_id
+               JOIN "Funding_Programs" fp ON fp.funding_unit_id = la.funding_unit_id
+               WHERE fp.program_id = $2 AND r.role_name = 'LGU Admin'`,
+              [
+                `Brgy. ${award.barangay_name} Coordinator disbursed ${amountFormatted} cash assistance to ${studentFullName} for ${award.program_name}.`,
+                award.program_id,
+              ],
+            );
+
+            await client.query("COMMIT");
+            return res.json({
+              message: "Cash assistance marked as disbursed successfully.",
+              grant: updated.rows[0],
+            });
+          } catch (err) {
+            await client.query("ROLLBACK");
+            return next(err);
+          } finally {
+            client.release();
+          }
+        },
+      );
+
+      // GET Coordinator notifications
+      app.get(
+        `${coordinatorBase}/notifications`,
+        ...roleMiddleware,
+        async (req, res, next) => {
+          try {
+            const result = await pool.query(
+              `SELECT notification_id, title, message, is_read, created_at
+               FROM "Notifications"
+               WHERE user_id = $1
+               ORDER BY created_at DESC
+               LIMIT 50`,
+              [req.auth.userId],
+            );
+            return res.json({ notifications: result.rows });
+          } catch (err) {
+            return next(err);
+          }
+        },
+      );
+
+      // PATCH mark notification read
+      app.patch(
+        `${coordinatorBase}/notifications/:notificationId/read`,
+        ...roleMiddleware,
+        async (req, res, next) => {
+          const notificationId = parsePositiveId(req.params.notificationId, "Notification ID", res);
+          if (!notificationId) return;
+          try {
+            await pool.query(
+              `UPDATE "Notifications"
+               SET is_read = TRUE
+               WHERE notification_id = $1 AND user_id = $2`,
+              [notificationId, req.auth.userId],
+            );
+            return res.json({ ok: true });
+          } catch (err) {
+            return next(err);
+          }
+        },
+      );
     }
   }
 

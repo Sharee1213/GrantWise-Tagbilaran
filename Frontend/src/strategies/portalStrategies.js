@@ -63,6 +63,7 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
       { id: "programs", label: "Programs & Allocations", icon: "Landmark" },
       { id: "verifications", label: "Application Queue", icon: "CheckSquare" },
       { id: "applications", label: "All Applications", icon: "FileText" },
+      { id: "disbursements", label: "Barangay Cash Disbursements", icon: "Banknote" },
     ];
   }
 
@@ -75,7 +76,7 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
   }
 
   async loadDashboardData(requestPortalData, apiRequest) {
-    const [dashboard, programs, applications, fundingCycles, queue, lookups] =
+    const [dashboard, programs, applications, fundingCycles, queue, lookups, disbursements] =
       await Promise.all([
         requestPortalData("admin/dashboard"),
         requestPortalData("admin/programs"),
@@ -83,7 +84,16 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
         requestPortalData("admin/funding-cycles"),
         requestPortalData("admin/verifications"),
         apiRequest("lookups"),
+        requestPortalData("admin/disbursements").catch(() => null),
       ]);
+    const activeDisbursements =
+      disbursements?.grants && disbursements.grants.length > 0
+        ? disbursements
+        : dashboard?.disbursements || {
+            grants: [],
+            barangay_breakdown: [],
+            audit_logs: [],
+          };
     return {
       ...dashboard,
       ...programs,
@@ -91,6 +101,7 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
       ...fundingCycles,
       ...queue,
       ...lookups,
+      disbursements: activeDisbursements,
     };
   }
 }
@@ -116,6 +127,7 @@ export class BarangayCoordinatorPortalStrategy extends RolePortalStrategy {
     return [
       { id: "overview", label: "Overview", icon: "LayoutDashboard" },
       { id: "verifications", label: "Residency Queue", icon: "ShieldCheck" },
+      { id: "grants", label: "Cash Grants & Claims", icon: "Banknote" },
     ];
   }
 
@@ -125,6 +137,16 @@ export class BarangayCoordinatorPortalStrategy extends RolePortalStrategy {
 
   getVerificationStrategy() {
     return new BarangayVerificationStrategy();
+  }
+
+  async loadDashboardData(requestPortalData, apiRequest) {
+    const [dashboard, queue, grantsData, notifsData] = await Promise.all([
+      requestPortalData("coordinator/dashboard"),
+      requestPortalData("coordinator/verifications"),
+      requestPortalData("coordinator/grants").catch(() => ({ grants: [] })),
+      requestPortalData("coordinator/notifications").catch(() => ({ notifications: [] })),
+    ]);
+    return { ...dashboard, ...queue, ...grantsData, ...notifsData };
   }
 }
 

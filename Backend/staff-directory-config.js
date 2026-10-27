@@ -163,19 +163,19 @@ const PROPOSED_SCHOOL_REGISTRAR_DIRECTORY = Object.freeze([
 ]);
 
 const DEFAULT_SCHOOL_DOMAIN_BY_ID = Object.freeze({
-    1: "hnu.edu.ph",
-    2: "bisu.edu.ph",
-    3: "ub.edu.ph",
-    4: "tcc.edu.ph",
-    5: "pmi-bohol.edu.ph"
+    1: ["hnu.edu.ph", "holyname.edu.ph", "holynameuniversity.edu.ph"],
+    2: ["bisu.edu.ph", "boholislandstateuniv.edu.ph", "boholislandstateuniversity.edu.ph"],
+    3: ["universityofbohol.edu.ph", "universityofbohol.ph", "ub.edu.ph"],
+    4: ["tagbilarancitycollege.edu.ph", "tcc.edu.ph"],
+    5: ["pmi-coleges.edu.ph", "pmi-colleges.edu.ph", "pmicollegesbohol.edu.ph", "pmi-bohol.edu.ph", "pmicolleges.edu.ph", "pmi.edu.ph"]
 });
 
 const DEFAULT_SCHOOL_DOMAIN_BY_NAME = Object.freeze({
-    "holy name university": { domain: "hnu.edu.ph", status: "verified" },
-    "bisu-tagbilaran": { domain: "bisu.edu.ph", status: "verified" },
-    "university of bohol": { domain: "ub.edu.ph", status: "candidate" },
-    "tagbilaran city college": { domain: "tcc.edu.ph", status: "verified" },
-    "pmi colleges main branch": { domain: "pmi-bohol.edu.ph", status: "candidate" }
+    "holy name university": { domain: ["hnu.edu.ph", "holyname.edu.ph", "holynameuniversity.edu.ph"], status: "verified" },
+    "bisu-tagbilaran": { domain: ["bisu.edu.ph", "boholislandstateuniv.edu.ph", "boholislandstateuniversity.edu.ph"], status: "verified" },
+    "university of bohol": { domain: ["universityofbohol.edu.ph", "universityofbohol.ph", "ub.edu.ph"], status: "verified" },
+    "tagbilaran city college": { domain: ["tagbilarancitycollege.edu.ph", "tcc.edu.ph"], status: "verified" },
+    "pmi colleges main branch": { domain: ["pmi-coleges.edu.ph", "pmi-colleges.edu.ph", "pmicollegesbohol.edu.ph", "pmi-bohol.edu.ph", "pmicolleges.edu.ph"], status: "verified" }
 });
 
 module.exports = {
