@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { ArrowRight, Landmark, LogOut, Menu, UserRound, X } from "lucide-react";
+import {
+  ArrowRight,
+  KeyRound,
+  Landmark,
+  LogOut,
+  Menu,
+  UserRound,
+  X,
+} from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
+import ChangePasswordDialog from "./ChangePasswordDialog.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import { getPortalPathForRole } from "../services/portalPaths.js";
 
@@ -21,6 +30,7 @@ export default function Topbar({
   isPortalView = false,
 }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const location = useLocation();
 
   // Close the public mobile menu whenever the route changes.
@@ -136,6 +146,16 @@ export default function Topbar({
               <button
                 type="button"
                 className="header-link header-logout-btn"
+                onClick={() => setChangePasswordOpen(true)}
+                title="Change your password"
+              >
+                <KeyRound size={14} aria-hidden="true" />
+                <span>Change password</span>
+              </button>
+
+              <button
+                type="button"
+                className="header-link header-logout-btn"
                 onClick={onLogout}
                 disabled={signingOut}
                 title="Sign out of GrantWise"
@@ -165,6 +185,13 @@ export default function Topbar({
             </NavLink>
           ))}
         </nav>
+      )}
+
+      {user && (
+        <ChangePasswordDialog
+          isOpen={changePasswordOpen}
+          onClose={() => setChangePasswordOpen(false)}
+        />
       )}
     </header>
   );
