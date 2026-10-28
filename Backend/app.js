@@ -166,7 +166,9 @@ function getEmailPolicyConfig(env = process.env) {
   );
   // Whitelisted System Admin accounts and Developer allowlist.
   const envDevEmails = env.DEVELOPER_ALLOWLIST_EMAILS
-    ? env.DEVELOPER_ALLOWLIST_EMAILS.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)
+    ? env.DEVELOPER_ALLOWLIST_EMAILS.split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean)
     : [];
   const developerAllowlist = new Set([
     ...SYSTEM_ADMIN_EMAILS.map((e) => e.toLowerCase()),
@@ -317,7 +319,10 @@ function validateEmailForRole(
 
   // Staff roles: whitelisted or authorized by developer
   if (STAFF_ROLES.has(role)) {
-    if (isWhitelistedStaff(normalized, role) || options.isDeveloperAuthorized === true) {
+    if (
+      isWhitelistedStaff(normalized, role) ||
+      options.isDeveloperAuthorized === true
+    ) {
       return { valid: true, normalizedEmail: normalized, domain };
     }
     return {
@@ -487,7 +492,9 @@ const registrationSchema = z
             "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
         },
       )
-      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
+      .transform((val) =>
+        val && val.trim() ? val.replace(/[\s-]/g, "") : null,
+      )
       .optional()
       .nullable(),
     barangayId: z
@@ -583,7 +590,9 @@ const staffProvisionSchema = z
             "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
         },
       )
-      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
+      .transform((val) =>
+        val && val.trim() ? val.replace(/[\s-]/g, "") : null,
+      )
       .optional()
       .nullable(),
     positionTitle: z.string().trim().min(1).max(100).optional().nullable(),
@@ -854,7 +863,9 @@ const staffInvitationRegisterSchema = z
             "Phone number must be exactly 11 digits starting with 09 (e.g. 09171234567).",
         },
       )
-      .transform((val) => (val && val.trim() ? val.replace(/[\s-]/g, "") : null))
+      .transform((val) =>
+        val && val.trim() ? val.replace(/[\s-]/g, "") : null,
+      )
       .optional()
       .nullable(),
     password: newPasswordSchema,
@@ -1412,7 +1423,7 @@ function createApp({
         let verifiedSchoolDomains = approvedSchool.rows[0]?.verified_domains;
         if (!verifiedSchoolDomains && capabilities.hasSchoolEmailDomains) {
           const domainRows = await client.query(
-            'SELECT domain FROM "School_Email_Domains" WHERE school_id = $1 AND domain_status = \'verified\'',
+            "SELECT domain FROM \"School_Email_Domains\" WHERE school_id = $1 AND domain_status = 'verified'",
             [data.schoolId],
           );
           if (domainRows.rowCount > 0) {
@@ -1420,7 +1431,7 @@ function createApp({
           }
         }
         const schoolEmailDomain =
-          (verifiedSchoolDomains && verifiedSchoolDomains.length > 0)
+          verifiedSchoolDomains && verifiedSchoolDomains.length > 0
             ? verifiedSchoolDomains
             : DEFAULT_SCHOOL_DOMAIN_BY_ID[data.schoolId] || null;
         if (schoolEmailDomain) {
@@ -2138,12 +2149,18 @@ function createApp({
       !user ||
       user.role_name === "Scholar" ||
       isWhitelistedStaff(user.email, user.role_name) ||
-      (user.role_name === "System Admin" && emailPolicyConfig.developerAllowlist.has(normalizeEmail(user.email))) ||
+      (user.role_name === "System Admin" &&
+        emailPolicyConfig.developerAllowlist.has(normalizeEmail(user.email))) ||
       (capabilities.hasStaffAuthorizations &&
         user.staff_auth_status === "active" &&
         user.staff_auth_role === user.role_name);
 
-    if (!user || !user.is_active || !validPassword || !isWhitelistedOrAuthorizedStaff) {
+    if (
+      !user ||
+      !user.is_active ||
+      !validPassword ||
+      !isWhitelistedOrAuthorizedStaff
+    ) {
       return res.status(401).json({ message: "Email or password is invalid." });
     }
 
@@ -2338,7 +2355,10 @@ function createApp({
       const isAuthorizedStaff =
         row.role_name === "Scholar" ||
         isWhitelistedStaff(row.email, row.role_name) ||
-        (row.role_name === "System Admin" && emailPolicyConfig.developerAllowlist.has(normalizeEmail(row.email))) ||
+        (row.role_name === "System Admin" &&
+          emailPolicyConfig.developerAllowlist.has(
+            normalizeEmail(row.email),
+          )) ||
         (capabilities.hasStaffAuthorizations &&
           row.staff_auth_status === "active" &&
           row.staff_auth_role === row.role_name);
@@ -2670,7 +2690,7 @@ function createApp({
            LEFT JOIN "Roles" r ON r.role_id = u.role_id
            WHERE log.action_type = 'grant_cash_disbursed'
            ORDER BY log.created_at DESC
-           LIMIT 50`
+           LIMIT 50`,
         );
 
         return res.json({
@@ -3282,7 +3302,7 @@ function createApp({
            LEFT JOIN "Roles" r ON r.role_id = u.role_id
            WHERE log.action_type = 'grant_cash_disbursed'
            ORDER BY log.created_at DESC
-           LIMIT 50`
+           LIMIT 50`,
         );
 
         return res.json({
@@ -3568,6 +3588,132 @@ function createApp({
     return res.json({ message: "Signed out." });
   });
 
+  const changePasswordRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    skip: () => env.NODE_ENV === "test",
+    message: {
+      message: "Too many password change attempts. Try again later.",
+    },
+  });
+
+  const changePasswordSchema = z
+    .object({
+      currentPassword: z
+        .string({ required_error: "Current password is required." })
+        .min(1, "Current password is required.")
+        .max(128, "Current password must be 128 characters or fewer."),
+      newPassword: newPasswordSchema,
+      confirmPassword: passwordConfirmationSchema,
+    })
+    .strict()
+    .refine((value) => value.newPassword === value.confirmPassword, {
+      message: "Passwords do not match.",
+      path: ["confirmPassword"],
+    })
+    .refine((value) => value.newPassword !== value.currentPassword, {
+      message: "New password must be different from your current password.",
+      path: ["newPassword"],
+    });
+
+  // Lets a signed-in user (including the seeded staff accounts) replace the
+  // password an admin gave them. Requires the current password, keeps this
+  // session signed in, and signs out every other session for the account.
+  app.post(
+    "/api/auth/change-password",
+    changePasswordRateLimit,
+    requireAuthentication,
+    async (req, res, next) => {
+      const input = changePasswordSchema.safeParse(req.body);
+      if (!input.success) {
+        return sendValidationError(
+          res,
+          "Please correct the highlighted fields.",
+          input.error.issues,
+        );
+      }
+
+      const { currentPassword, newPassword } = input.data;
+      const currentToken = req.cookies[SESSION_COOKIE];
+      const client = await pool.connect();
+      try {
+        const existing = await client.query(
+          `SELECT password_hash FROM "Users" WHERE user_id = $1 AND is_active = TRUE`,
+          [req.auth.userId],
+        );
+        if (existing.rowCount !== 1) {
+          return res
+            .status(401)
+            .json({ message: "Authentication is required." });
+        }
+
+        let currentIsValid = false;
+        try {
+          currentIsValid = await argon2.verify(
+            existing.rows[0].password_hash,
+            currentPassword,
+          );
+        } catch {
+          currentIsValid = false;
+        }
+        if (!currentIsValid) {
+          return res.status(400).json({
+            message: "Your current password is incorrect.",
+            errors: [
+              {
+                field: "currentPassword",
+                message: "Your current password is incorrect.",
+              },
+            ],
+          });
+        }
+
+        const newHash = await argon2.hash(newPassword, {
+          type: argon2.argon2id,
+          memoryCost: 19456,
+          timeCost: 2,
+          parallelism: 1,
+        });
+
+        await client.query("BEGIN");
+        await client.query(
+          `UPDATE "Users" SET password_hash = $1, updated_at = NOW() WHERE user_id = $2`,
+          [newHash, req.auth.userId],
+        );
+        const revoked = await client.query(
+          `UPDATE "Login_Sessions"
+              SET revoked_at = NOW()
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+              AND token_hash <> $2`,
+          [req.auth.userId, tokenHash(currentToken)],
+        );
+        await client.query(
+          `INSERT INTO "Audit_Logs" (user_id, action_type, entity_type, entity_id, details)
+           VALUES ($1, 'password_changed', 'Users', $1,
+                   jsonb_build_object('role', $2::TEXT, 'other_sessions_revoked', $3::INT))`,
+          [req.auth.userId, req.auth.role, revoked.rowCount],
+        );
+        await client.query("COMMIT");
+
+        return res.json({
+          message: "Password updated. Other devices have been signed out.",
+        });
+      } catch (error) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // ignore rollback error
+        }
+        return next(error);
+      } finally {
+        client.release();
+      }
+    },
+  );
+
   app.get("/api/auth/me", requireAuthentication, (req, res) => {
     res.json({
       user: {
@@ -3624,7 +3770,9 @@ function createApp({
       if (!notificationId) return;
       const capabilities = await getSchemaCapabilities(pool);
       if (!capabilities.hasNotificationsTable) {
-        return res.status(404).json({ message: "Notifications not supported." });
+        return res
+          .status(404)
+          .json({ message: "Notifications not supported." });
       }
       const result = await pool.query(
         `UPDATE "Notifications"
@@ -4286,12 +4434,21 @@ function createApp({
                   [task.application_id],
                 );
                 if (appDetails.rowCount > 0) {
-                  const { user_id: studentUserId, first_name, last_name, program_name, barangay_name, barangay_id } = appDetails.rows[0];
+                  const {
+                    user_id: studentUserId,
+                    first_name,
+                    last_name,
+                    program_name,
+                    barangay_name,
+                    barangay_id,
+                  } = appDetails.rows[0];
                   const studentName = `${first_name} ${last_name}`.trim();
                   const locationText = barangay_name
                     ? `the Brgy. ${barangay_name} Hall/Office`
                     : "your Barangay Hall/Office";
-                  const amountFormatted = Number(input.data.awardAmount).toLocaleString("en-PH", {
+                  const amountFormatted = Number(
+                    input.data.awardAmount,
+                  ).toLocaleString("en-PH", {
                     style: "currency",
                     currency: "PHP",
                   });
@@ -4313,7 +4470,7 @@ function createApp({
                       `SELECT user_id FROM "Barangay_Coordinators"
                        WHERE barangay_id = $1 AND is_current = TRUE
                        LIMIT 1`,
-                      [barangay_id]
+                      [barangay_id],
                     );
                     if (coordRes.rowCount > 0) {
                       const coordUserId = coordRes.rows[0].user_id;
@@ -4330,10 +4487,13 @@ function createApp({
                   }
                 }
               } catch (notifyError) {
-                logger.error("Failed to record student notification on approval", {
-                  code: notifyError.code,
-                  message: notifyError.message,
-                });
+                logger.error(
+                  "Failed to record student notification on approval",
+                  {
+                    code: notifyError.code,
+                    message: notifyError.message,
+                  },
+                );
               }
             }
           }
@@ -4385,7 +4545,8 @@ function createApp({
             });
           }
           if (["P0001", "23514"].includes(error.code)) {
-            const reason = error.code === "P0001" && error.message ? error.message : null;
+            const reason =
+              error.code === "P0001" && error.message ? error.message : null;
             return res.status(409).json({
               message: reason
                 ? `The decision could not be saved: ${reason}`
@@ -4603,7 +4764,8 @@ function createApp({
           const awardId = parsePositiveId(req.params.awardId, "Award ID", res);
           if (!awardId) return;
 
-          const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+          const notes =
+            typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
           const client = await pool.connect();
           try {
             await client.query("BEGIN");
@@ -4627,20 +4789,30 @@ function createApp({
 
             if (awardRes.rowCount === 0) {
               await client.query("ROLLBACK");
-              return res.status(404).json({ message: "Scholarship grant record not found for your barangay." });
+              return res.status(404).json({
+                message:
+                  "Scholarship grant record not found for your barangay.",
+              });
             }
 
             const award = awardRes.rows[0];
             if (award.award_status !== "approved") {
               await client.query("ROLLBACK");
-              return res.status(409).json({ message: "This grant has not been approved by the LGU." });
+              return res.status(409).json({
+                message: "This grant has not been approved by the LGU.",
+              });
             }
             if (award.claim_status === "claimed") {
               await client.query("ROLLBACK");
-              return res.status(409).json({ message: "This scholarship grant has already been disbursed and claimed." });
+              return res.status(409).json({
+                message:
+                  "This scholarship grant has already been disbursed and claimed.",
+              });
             }
 
-            const claimNotes = notes || "Cash assistance released in full to student at Barangay Hall.";
+            const claimNotes =
+              notes ||
+              "Cash assistance released in full to student at Barangay Hall.";
             const updated = await client.query(
               `UPDATE "Scholarship_Awards"
                SET claim_status = 'claimed',
@@ -4681,17 +4853,25 @@ function createApp({
                  RETURNING disbursement_id`,
                 [awardId, award.award_amount],
               );
-              await client.query("SELECT set_config('grantwise.internal_disbursement_release', 'on', true)");
+              await client.query(
+                "SELECT set_config('grantwise.internal_disbursement_release', 'on', true)",
+              );
               await client.query(
                 `UPDATE "Disbursements" SET status = 'released', released_at = CURRENT_TIMESTAMP WHERE disbursement_id = $1`,
                 [disbIns.rows[0].disbursement_id],
               );
-              await client.query("SELECT set_config('grantwise.internal_disbursement_release', 'off', true)");
+              await client.query(
+                "SELECT set_config('grantwise.internal_disbursement_release', 'off', true)",
+              );
             } catch (disbErr) {
-              console.warn("Disbursements table sync warning:", disbErr.message);
+              console.warn(
+                "Disbursements table sync warning:",
+                disbErr.message,
+              );
             }
 
-            const studentFullName = `${award.first_name} ${award.last_name}`.trim();
+            const studentFullName =
+              `${award.first_name} ${award.last_name}`.trim();
             await client.query(
               `INSERT INTO "Audit_Logs" (
                  user_id, action_type, entity_type, entity_id, details
@@ -4723,10 +4903,13 @@ function createApp({
               ],
             );
 
-            const amountFormatted = Number(award.award_amount).toLocaleString("en-PH", {
-              style: "currency",
-              currency: "PHP",
-            });
+            const amountFormatted = Number(award.award_amount).toLocaleString(
+              "en-PH",
+              {
+                style: "currency",
+                currency: "PHP",
+              },
+            );
 
             // Notify Student
             await client.query(
@@ -4796,7 +4979,11 @@ function createApp({
         `${coordinatorBase}/notifications/:notificationId/read`,
         ...roleMiddleware,
         async (req, res, next) => {
-          const notificationId = parsePositiveId(req.params.notificationId, "Notification ID", res);
+          const notificationId = parsePositiveId(
+            req.params.notificationId,
+            "Notification ID",
+            res,
+          );
           if (!notificationId) return;
           try {
             await pool.query(
