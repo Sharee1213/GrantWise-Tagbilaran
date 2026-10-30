@@ -51,6 +51,33 @@ export default function Sidebar({
   const strategy = getPortalStrategy(portalType || user?.role);
   const navItems = strategy ? strategy.getNavItems() : [];
 
+  const navEntries = [
+    ...navItems.map((item) => ({
+      ...item,
+      kind: "section",
+      href: `#${item.id}`,
+      isActive: location.hash === `#${item.id}`,
+    })),
+    {
+      id: "portal-directory",
+      label: "Portal Directory",
+      icon: "Globe",
+      kind: "link",
+      href: "/portals",
+      isActive: location.pathname === "/portals",
+    },
+    {
+      id: "public-programs",
+      label: "Public Programs",
+      icon: "GraduationCap",
+      kind: "link",
+      href: "/programs",
+      isActive: location.pathname === "/programs",
+    },
+  ];
+
+  const activeIndex = navEntries.findIndex((item) => item.isActive);
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -103,13 +130,42 @@ export default function Sidebar({
           </div>
 
           <ul className="sidebar-nav-list">
-            {navItems.map((item) => {
+            {activeIndex >= 0 && (
+              <li
+                className="sidebar-nav-indicator"
+                aria-hidden="true"
+                style={{ transform: `translateY(${activeIndex * 44}px)` }}
+              />
+            )}
+
+            {navEntries.map((item, index) => {
               const Icon = ICON_MAP[item.icon] || LayoutDashboard;
+              const isActive = item.isActive || (item.kind === "section" && index === activeIndex);
+              const itemClassName = `sidebar-nav-item ${isActive ? "active" : ""} ${item.pending ? "is-pending" : ""}`;
+
+              if (item.kind === "link") {
+                return (
+                  <li key={item.id}>
+                    <NavLink
+                      to={item.href}
+                      className={({ isActive: navIsActive }) =>
+                        `sidebar-nav-item ${navIsActive ? "active" : ""} ${item.pending ? "is-pending" : ""}`
+                      }
+                      title={collapsed ? item.label : undefined}
+                      onClick={onCloseMobile}
+                    >
+                      <Icon size={18} className="sidebar-item-icon" aria-hidden="true" />
+                      {!collapsed && <span className="sidebar-item-label">{item.label}</span>}
+                    </NavLink>
+                  </li>
+                );
+              }
+
               return (
                 <li key={item.id}>
                   <a
-                    href={`#${item.id}`}
-                    className="sidebar-nav-item"
+                    href={item.href}
+                    className={itemClassName}
                     title={collapsed ? item.label : undefined}
                     onClick={() => {
                       if (onCloseMobile) onCloseMobile();
@@ -121,31 +177,6 @@ export default function Sidebar({
                 </li>
               );
             })}
-
-            <li className="sidebar-nav-divider" />
-
-            <li>
-              <NavLink
-                to="/portals"
-                className="sidebar-nav-item"
-                title={collapsed ? "All Portals" : undefined}
-                onClick={onCloseMobile}
-              >
-                <Globe size={18} className="sidebar-item-icon" aria-hidden="true" />
-                {!collapsed && <span className="sidebar-item-label">Portal Directory</span>}
-              </NavLink>
-            </li>
-            <li>
-              <NavLink
-                to="/programs"
-                className="sidebar-nav-item"
-                title={collapsed ? "Public Programs" : undefined}
-                onClick={onCloseMobile}
-              >
-                <GraduationCap size={18} className="sidebar-item-icon" aria-hidden="true" />
-                {!collapsed && <span className="sidebar-item-label">Public Programs</span>}
-              </NavLink>
-            </li>
           </ul>
         </nav>
 

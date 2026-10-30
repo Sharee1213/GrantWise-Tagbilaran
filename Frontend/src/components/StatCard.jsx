@@ -49,7 +49,7 @@ export default function StatCard({
       <div className="stat-card-header">
         <span className="stat-card-title">{title}</span>
         {Icon && (
-          <span className="stat-card-icon-wrapper" aria-hidden="true">
+          <span className={`stat-card-icon-wrapper stat-card-icon-wrapper-${variant}`} aria-hidden="true">
             <Icon size={18} />
           </span>
         )}
