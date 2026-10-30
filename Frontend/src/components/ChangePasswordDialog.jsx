@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import ModalDialog from "./ModalDialog.jsx";
 import PasswordGuidance from "./PasswordGuidance.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { apiRequest } from "../services/api.js";
 import { getNewPasswordError } from "../services/passwordPolicy.js";
 
@@ -20,6 +21,7 @@ export default function ChangePasswordDialog({ isOpen, onClose }) {
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
   const closeTimer = useRef(null);
+  const { addToast } = useToast();
 
   // Start clean every time the dialog opens.
   useEffect(() => {
@@ -75,8 +77,14 @@ export default function ChangePasswordDialog({ isOpen, onClose }) {
         method: "POST",
         body: JSON.stringify(form),
       });
+      const successMessage = result?.message || "Password updated.";
       setForm(EMPTY_FORM);
-      setSuccess(result?.message || "Password updated.");
+      setSuccess(successMessage);
+      addToast({
+        variant: "success",
+        title: "Password updated",
+        message: successMessage,
+      });
       closeTimer.current = setTimeout(onClose, 2000);
     } catch (requestError) {
       const apiErrors = {};

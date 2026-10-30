@@ -27,6 +27,7 @@ import ModalDialog from "../components/ModalDialog.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import LoadingSkeleton from "../components/LoadingSkeleton.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { getPortalPathForRole } from "../services/portalPaths.js";
 import { apiRequest } from "../services/api.js";
 
@@ -71,6 +72,7 @@ export default function StudentPortalPage() {
   const [confirmApplyProgram, setConfirmApplyProgram] = useState(null);
 
   const navigate = useNavigate();
+  const { addToast } = useToast();
 
   async function loadData() {
     setLoading(true);
@@ -94,6 +96,8 @@ export default function StudentPortalPage() {
       setApplications(applicationData.applications || []);
       setProfile(profileData?.profile || null);
     } catch (requestError) {
+      const loadFailureMessage =
+        requestError.message || "Could not load your student portal.";
       if (requestError.status === 401) {
         const programId = searchParams.get("programId");
         navigate(
@@ -105,7 +109,12 @@ export default function StudentPortalPage() {
           },
         );
       } else {
-        setError(requestError.message || "Could not load your student portal.");
+        setError(loadFailureMessage);
+        addToast({
+          variant: "error",
+          title: "Portal load failed",
+          message: loadFailureMessage,
+        });
       }
     } finally {
       setLoading(false);
@@ -202,13 +211,24 @@ export default function StudentPortalPage() {
         body: JSON.stringify({ programId: numericProgramId }),
       });
       await refreshApplications();
-      setNotice(
-        `Application submitted successfully! Your application is now queued for municipal review.`,
-      );
+      const successMessage =
+        "Application submitted successfully! Your application is now queued for municipal review.";
+      setNotice(successMessage);
+      addToast({
+        variant: "success",
+        title: "Application submitted",
+        message: successMessage,
+      });
       setSelectedProgramId("");
       setConfirmApplyProgram(null);
     } catch (requestError) {
-      setError(requestError.message || "Could not submit your application.");
+      const errorMessage = requestError.message || "Could not submit your application.";
+      setError(errorMessage);
+      addToast({
+        variant: "error",
+        title: "Application not submitted",
+        message: errorMessage,
+      });
     } finally {
       setSubmitting(false);
     }

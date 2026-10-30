@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import ModalDialog from "./ModalDialog.jsx";
+import { AnimatedCheckMark } from "./ToastRegion.jsx";
 import { formatPhp } from "../services/format.js";
 
 export default function DisburseModal({
@@ -22,6 +23,9 @@ export default function DisburseModal({
       subtitle={`${grant.first_name} ${grant.last_name} · ${grant.program_name}`}
     >
       <div className="space-y-4">
+        <div className="disburse-confirmation-badge" aria-hidden="true">
+          <AnimatedCheckMark className="disburse-confirmation-check" />
+        </div>
         <div className="p-4 rounded-xl bg-muted/40 border border-border space-y-2">
           <div className="flex justify-between items-center text-sm">
             <span className="text-muted">Student Name</span>

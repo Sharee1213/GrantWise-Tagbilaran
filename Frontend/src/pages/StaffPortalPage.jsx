@@ -34,6 +34,7 @@ import ModalDialog from "../components/ModalDialog.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import LoadingSkeleton from "../components/LoadingSkeleton.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { getPortalStrategy } from "../strategies/portalStrategies.js";
 import { apiRequest } from "../services/api.js";
 import { displayStatus, formatPhp } from "../services/format.js";
@@ -77,6 +78,7 @@ export default function StaffPortalPage() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState("");
+  const { addToast } = useToast();
 
   const loadErrors = Array.isArray(data?.loadErrors) ? data.loadErrors : [];
   const getLoadError = useCallback(
@@ -146,21 +148,30 @@ export default function StaffPortalPage() {
       );
       setData(loaded);
     } catch (requestError) {
+      const loadErrorMessage =
+        requestError.message || "Please refresh or sign in again.";
+      const loadErrorTitle =
+        requestError.status === 503
+          ? "Workflow schema or database prerequisites not ready."
+          : requestError.status === 403
+            ? "Access denied. Your account is not authorized for this role scope."
+            : requestError.status === 401
+              ? "Your authentication session is expired."
+              : "Failed to load portal records.";
+
       setError({
         status: requestError.status,
-        title:
-          requestError.status === 503
-            ? "Workflow schema or database prerequisites not ready."
-            : requestError.status === 403
-              ? "Access denied. Your account is not authorized for this role scope."
-              : requestError.status === 401
-                ? "Your authentication session is expired."
-                : "Failed to load portal records.",
-        message: requestError.message || "Please refresh or sign in again.",
+        title: loadErrorTitle,
+        message: loadErrorMessage,
+      });
+      addToast({
+        variant: "error",
+        title: "Portal load failed",
+        message: loadErrorMessage,
       });
       setData(null);
     }
-  }, [strategy, requestPortalData]);
+  }, [addToast, strategy, requestPortalData]);
 
   const retryLoadError = useCallback(
     async (key) => {
@@ -208,21 +219,26 @@ export default function StaffPortalPage() {
           return next;
         });
       } catch (requestError) {
+        const retryErrorMessage = requestError.message || "Unable to reload this data right now.";
+        addToast({
+          variant: "error",
+          title: "Retry failed",
+          message: retryErrorMessage,
+        });
         setData((current) => {
           const next = { ...(current || {}) };
           next.loadErrors = [
             ...((Array.isArray(next.loadErrors) ? next.loadErrors : []).filter((entry) => entry.key !== key)),
             {
               key,
-              message:
-                requestError.message ||"Unable to reload this data right now.",
+              message: retryErrorMessage,
             },
           ];
           return next;
         });
       }
     },
-    [requestPortalData, strategy],
+    [addToast, requestPortalData, strategy],
   );
 
   useEffect(() => {
@@ -400,17 +416,29 @@ export default function StaffPortalPage() {
   // Coordinator Grant Disbursement Handling
   async function handleDisburseGrant() {
     if (!disburseModalGrant) return;
+    const successMessage = `Cash assistance of ${formatPhp(disburseModalGrant.award_amount)} marked as disbursed to ${disburseModalGrant.first_name} ${disburseModalGrant.last_name}.`;
     const saved = await handleMutation(
       () =>
         apiRequest(`coordinator/grants/${disburseModalGrant.award_id}/disburse`, {
           method: "PATCH",
           body: JSON.stringify({ notes: disburseNotes }),
         }),
-      `Cash assistance of ${formatPhp(disburseModalGrant.award_amount)} marked as disbursed to ${disburseModalGrant.first_name} ${disburseModalGrant.last_name}.`,
+      successMessage,
     );
     if (saved) {
+      addToast({
+        variant: "success",
+        title: "Cash assistance released",
+        message: successMessage,
+      });
       setDisburseModalGrant(null);
       setDisburseNotes("");
+    } else {
+      addToast({
+        variant: "error",
+        title: "Disbursement failed",
+        message: "The cash handover could not be recorded.",
+      });
     }
   }
 
