@@ -34,6 +34,11 @@ function statusLabel(status) {
   return String(status || "").replaceAll("_", " ");
 }
 
+function formatDocumentType(value) {
+  const label = String(value || "Document").replaceAll("_", " ");
+  return label.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 export default function StudentPortalPage() {
   const [searchParams] = useSearchParams();
   const [selectedProgramId, setSelectedProgramId] = useState(
@@ -46,6 +51,7 @@ export default function StudentPortalPage() {
   const [applicationSubmissionEnabled, setApplicationSubmissionEnabled] =
     useState(false);
   const [details, setDetails] = useState({});
+  const [applicationDocuments, setApplicationDocuments] = useState({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(null);
@@ -220,10 +226,19 @@ export default function StudentPortalPage() {
     setLoadingDetail(applicationId);
     setError("");
     try {
-      const result = await apiRequest(`student/applications/${applicationId}`);
+      const [detailResult, documentResult] = await Promise.all([
+        apiRequest(`student/applications/${applicationId}`),
+        apiRequest(`student/applications/${applicationId}/documents`),
+      ]);
       setDetails((current) => ({
         ...current,
-        [applicationId]: result,
+        [applicationId]: detailResult,
+      }));
+      setApplicationDocuments((current) => ({
+        ...current,
+        [applicationId]: Array.isArray(documentResult?.documents)
+          ? documentResult.documents
+          : [],
       }));
     } catch (requestError) {
       setError(
@@ -602,6 +617,51 @@ export default function StudentPortalPage() {
                                 )}
                               </div>
                             ))}
+                          </div>
+
+                          <div className="mt-4">
+                            <h5 className="text-[11px] font-bold uppercase tracking-wider text-muted mb-2">
+                              Application Documents
+                            </h5>
+
+                            {(applicationDocuments[app.application_id] || []).length === 0 ? (
+                              <p className="text-xs text-muted m-0">
+                                No documents recorded for this application
+                              </p>
+                            ) : (
+                              <div className="space-y-2">
+                                {(applicationDocuments[app.application_id] || []).map((document) => {
+                                  const isVerified = Boolean(document.is_verified);
+                                  return (
+                                    <div
+                                      key={document.document_id}
+                                      className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border-color)] bg-[var(--surface)] px-3 py-2"
+                                    >
+                                      <div className="min-w-0">
+                                        <div className="font-medium text-sm">
+                                          {formatDocumentType(document.document_type)}
+                                        </div>
+                                        <div className="text-[11px] text-muted">
+                                          {document.uploaded_at
+                                            ? new Date(document.uploaded_at).toLocaleString("en-PH")
+                                            : "Date unavailable"}
+                                        </div>
+                                      </div>
+                                      <span
+                                        className={`status-badge ${
+                                          isVerified
+                                            ? "status-badge-success"
+                                            : "status-badge-warning"
+                                        }`}
+                                        role="status"
+                                      >
+                                        {isVerified ? "Verified" : "Pending"}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
