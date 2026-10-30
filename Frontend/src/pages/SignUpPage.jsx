@@ -5,6 +5,9 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Lock,
+  Mail,
+  ShieldCheck,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
@@ -328,369 +331,408 @@ export default function SignUpPage() {
         description="Scholarship applicants register here using a personal Gmail (@gmail.com) or school-issued email address. LGU Program Admin, Barangay Coordinator, and School Registrar accounts are provisioned only through authorized administration."
       />
 
-      <div className="auth-card">
-        {error && (
-          <div role="alert" className="auth-banner auth-banner-error">
-            <AlertCircle size={18} aria-hidden="true" />
-            <div>
-              <strong>Registration could not be completed</strong>
-              <p>{error}</p>
-            </div>
+      <div className="auth-card auth-card-split">
+        <aside className="auth-brand-panel">
+          <div className="auth-brand-mark" aria-hidden="true">
+            <ShieldCheck size={28} />
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          <div className="form-grid-two">
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-firstName">
-                First name
-              </label>
-              <input
-                id="signup-firstName"
-                className={`form-input ${getFieldError("firstName") ? "form-input-error" : ""}`}
-                name="firstName"
-                placeholder="Juan"
-                value={form.firstName}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                autoComplete="given-name"
-                aria-invalid={Boolean(getFieldError("firstName"))}
-                disabled={loading}
-                required
-              />
-              {getFieldError("firstName") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("firstName")}
-                </p>
-              )}
-            </div>
-
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-lastName">
-                Last name
-              </label>
-              <input
-                id="signup-lastName"
-                className={`form-input ${getFieldError("lastName") ? "form-input-error" : ""}`}
-                name="lastName"
-                placeholder="Dela Cruz"
-                value={form.lastName}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                autoComplete="family-name"
-                aria-invalid={Boolean(getFieldError("lastName"))}
-                disabled={loading}
-                required
-              />
-              {getFieldError("lastName") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("lastName")}
-                </p>
-              )}
-            </div>
+          <div className="auth-brand-copy">
+            <h2>Start your application with a verified student profile.</h2>
+            <p>
+              Build your account once and keep your scholarship data, school history, and eligibility records in sync.
+            </p>
           </div>
+          <ul className="auth-brand-benefits">
+            <li>Apply for grant opportunities faster</li>
+            <li>Match with the right barangay and school</li>
+            <li>Keep your profile secure and role-ready</li>
+          </ul>
+        </aside>
 
-          <div className="form-grid-two">
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-email">
-                Email address
-              </label>
-              <input
-                id="signup-email"
-                className={`form-input ${getFieldError("email") ? "form-input-error" : ""}`}
-                name="email"
-                type="email"
-                inputMode="email"
-                placeholder="name@gmail.com or student@school.edu.ph"
-                value={form.email}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                autoComplete="email"
-                aria-invalid={Boolean(getFieldError("email"))}
-                aria-describedby="signup-email-hint"
-                disabled={loading}
-                required
-              />
-              <p id="signup-email-hint" className="field-hint">
-                Accepted: personal Gmail (<code>@gmail.com</code>) or official school email (<code>@hnu.edu.ph</code>, <code>@universityofbohol.edu.ph</code>, <code>@bisu.edu.ph</code>, <code>@tagbilarancitycollege.edu.ph</code>, <code>@pmicollegesbohol.edu.ph</code>, <code>@pmi-coleges.edu.ph</code>).
-              </p>
-              {getFieldError("email") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("email")}
-                </p>
-              )}
-            </div>
-
-            <div className="form-field">
-              <div className="form-label-row">
-                <label className="form-label" htmlFor="signup-phoneNumber">
-                  Phone number
-                </label>
-                <span className="form-label-meta">Optional · 11 digits</span>
+        <div className="auth-form-panel">
+          {error && (
+            <div role="alert" className="auth-banner auth-banner-error">
+              <AlertCircle size={18} aria-hidden="true" />
+              <div>
+                <strong>Registration could not be completed</strong>
+                <p>{error}</p>
               </div>
-              <input
-                id="signup-phoneNumber"
-                className={`form-input ${getFieldError("phoneNumber") ? "form-input-error" : ""}`}
-                name="phoneNumber"
-                type="tel"
-                placeholder="09171234567"
-                maxLength={13}
-                value={form.phoneNumber}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                autoComplete="tel"
-                aria-invalid={Boolean(getFieldError("phoneNumber"))}
-                aria-describedby="signup-phone-hint"
-                disabled={loading}
-              />
-              <p id="signup-phone-hint" className="field-hint">
-                Must be exactly 11 digits starting with 09 (e.g. 09171234567).
-              </p>
-              {getFieldError("phoneNumber") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("phoneNumber")}
-                </p>
-              )}
             </div>
-          </div>
+          )}
 
-          <div className="form-grid-two">
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-password">
-                Password
-              </label>
-              <div className="input-with-icon">
+          <form onSubmit={handleSubmit} className="auth-form" noValidate>
+            <div className="form-grid-two">
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-firstName">
+                  First name
+                </label>
                 <input
-                  id="signup-password"
-                  className={`form-input has-trailing-action ${
-                    getFieldError("password") ? "form-input-error" : ""
-                  }`}
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="At least 12 characters"
-                  value={form.password}
+                  id="signup-firstName"
+                  className={`form-input ${getFieldError("firstName") ? "form-input-error" : ""}`}
+                  name="firstName"
+                  placeholder="Juan"
+                  value={form.firstName}
                   onChange={handleChange}
                   onBlur={handleBlur}
-                  onKeyDown={handlePasswordKeyEvent}
-                  onKeyUp={handlePasswordKeyEvent}
-                  autoComplete="new-password"
-                  aria-invalid={Boolean(getFieldError("password"))}
+                  autoComplete="given-name"
+                  aria-invalid={Boolean(getFieldError("firstName"))}
                   disabled={loading}
                   required
                 />
-                <button
-                  className="password-toggle-btn"
-                  type="button"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  aria-pressed={showPassword}
-                >
-                  {showPassword ? (
-                    <EyeOff size={18} aria-hidden="true" />
-                  ) : (
-                    <Eye size={18} aria-hidden="true" />
-                  )}
-                </button>
+                {getFieldError("firstName") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("firstName")}
+                  </p>
+                )}
               </div>
-              {getFieldError("password") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("password")}
-                </p>
-              )}
-            </div>
 
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-confirmPassword">
-                Confirm password
-              </label>
-              <input
-                id="signup-confirmPassword"
-                className={`form-input ${
-                  getFieldError("confirmPassword") ? "form-input-error" : ""
-                }`}
-                name="confirmPassword"
-                type={showPassword ? "text" : "password"}
-                placeholder="Re-enter your password"
-                value={form.confirmPassword}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                onKeyDown={handlePasswordKeyEvent}
-                onKeyUp={handlePasswordKeyEvent}
-                autoComplete="new-password"
-                aria-invalid={Boolean(getFieldError("confirmPassword"))}
-                disabled={loading}
-                required
-              />
-              {getFieldError("confirmPassword") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("confirmPassword")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {capsLockOn && (
-            <p role="status" className="field-warning">
-              <KeyRound size={14} aria-hidden="true" />
-              Caps Lock is on — passwords are case-sensitive.
-            </p>
-          )}
-
-          <PasswordGuidance password={form.password} />
-
-          <div className="form-grid-two">
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-barangayId">
-                Barangay (Tagbilaran City)
-              </label>
-              <select
-                id="signup-barangayId"
-                className={`form-input ${getFieldError("barangayId") ? "form-input-error" : ""}`}
-                name="barangayId"
-                value={form.barangayId}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                aria-invalid={Boolean(getFieldError("barangayId"))}
-                disabled={loading || lookupsLoading}
-                required
-              >
-                <option value="">
-                  {lookupsLoading ? "Loading barangays..." : "Select your barangay"}
-                </option>
-                {barangays.map((b) => (
-                  <option key={b.barangay_id} value={b.barangay_id}>
-                    {b.barangay_name}
-                  </option>
-                ))}
-              </select>
-              {getFieldError("barangayId") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("barangayId")}
-                </p>
-              )}
-            </div>
-
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-schoolId">
-                School or university
-              </label>
-              <select
-                id="signup-schoolId"
-                className={`form-input ${getFieldError("schoolId") ? "form-input-error" : ""}`}
-                name="schoolId"
-                value={form.schoolId}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                aria-invalid={Boolean(getFieldError("schoolId"))}
-                disabled={loading || lookupsLoading}
-                required
-              >
-                <option value="">
-                  {lookupsLoading ? "Loading schools..." : "Select your school"}
-                </option>
-                {schools.map((s) => (
-                  <option key={s.school_id} value={s.school_id}>
-                    {s.school_name}
-                  </option>
-                ))}
-              </select>
-              {getFieldError("schoolId") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("schoolId")}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="form-grid-two">
-            <div className="form-field">
-              <label className="form-label" htmlFor="signup-studentNumber">
-                Student ID number
-              </label>
-              <input
-                id="signup-studentNumber"
-                className={`form-input ${
-                  getFieldError("studentNumber") ? "form-input-error" : ""
-                }`}
-                name="studentNumber"
-                placeholder="e.g. 2024-00123"
-                value={form.studentNumber}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                aria-invalid={Boolean(getFieldError("studentNumber"))}
-                disabled={loading}
-                required
-              />
-              {getFieldError("studentNumber") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("studentNumber")}
-                </p>
-              )}
-            </div>
-
-            <div className="form-field">
-              <div className="form-label-row">
-                <label className="form-label" htmlFor="signup-yearLevel">
-                  Year level
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-lastName">
+                  Last name
                 </label>
-                <span className="form-label-meta">Optional</span>
+                <input
+                  id="signup-lastName"
+                  className={`form-input ${getFieldError("lastName") ? "form-input-error" : ""}`}
+                  name="lastName"
+                  placeholder="Dela Cruz"
+                  value={form.lastName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  autoComplete="family-name"
+                  aria-invalid={Boolean(getFieldError("lastName"))}
+                  disabled={loading}
+                  required
+                />
+                {getFieldError("lastName") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("lastName")}
+                  </p>
+                )}
               </div>
-              <select
-                id="signup-yearLevel"
-                className={`form-input ${getFieldError("yearLevel") ? "form-input-error" : ""}`}
-                name="yearLevel"
-                value={form.yearLevel}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                disabled={loading}
-              >
-                <option value="">Select year level</option>
-                {YEAR_LEVEL_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-              {getFieldError("yearLevel") && (
-                <p role="alert" className="field-error">
-                  {getFieldError("yearLevel")}
-                </p>
-              )}
             </div>
-          </div>
 
-          <div className="form-field">
-            <label className="form-label" htmlFor="signup-course">
-              Course or degree program
-            </label>
-            <input
-              id="signup-course"
-              className={`form-input ${getFieldError("course") ? "form-input-error" : ""}`}
-              name="course"
-              placeholder="e.g. BS Information Technology"
-              value={form.course}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              aria-invalid={Boolean(getFieldError("course"))}
-              disabled={loading}
-              required
-            />
-            {getFieldError("course") && (
-              <p role="alert" className="field-error">
-                {getFieldError("course")}
+            <div className="form-grid-two">
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-email">
+                  Email address
+                </label>
+                <div className="input-with-icon">
+                  <Mail size={16} className="input-leading-icon" aria-hidden="true" />
+                  <input
+                    id="signup-email"
+                    className={`form-input has-leading-icon ${getFieldError("email") ? "form-input-error" : ""}`}
+                    name="email"
+                    type="email"
+                    inputMode="email"
+                    placeholder="name@gmail.com or student@school.edu.ph"
+                    value={form.email}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    autoComplete="email"
+                    aria-invalid={Boolean(getFieldError("email"))}
+                    aria-describedby="signup-email-hint"
+                    disabled={loading}
+                    required
+                  />
+                </div>
+                <p id="signup-email-hint" className="field-hint">
+                  Accepted: personal Gmail (<code>@gmail.com</code>) or official school email (<code>@hnu.edu.ph</code>, <code>@universityofbohol.edu.ph</code>, <code>@bisu.edu.ph</code>, <code>@tagbilarancitycollege.edu.ph</code>, <code>@pmicollegesbohol.edu.ph</code>, <code>@pmi-coleges.edu.ph</code>).
+                </p>
+                {getFieldError("email") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("email")}
+                  </p>
+                )}
+              </div>
+
+              <div className="form-field">
+                <div className="form-label-row">
+                  <label className="form-label" htmlFor="signup-phoneNumber">
+                    Phone number
+                  </label>
+                  <span className="form-label-meta">Optional · 11 digits</span>
+                </div>
+                <input
+                  id="signup-phoneNumber"
+                  className={`form-input ${getFieldError("phoneNumber") ? "form-input-error" : ""}`}
+                  name="phoneNumber"
+                  type="tel"
+                  placeholder="09171234567"
+                  maxLength={13}
+                  value={form.phoneNumber}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  autoComplete="tel"
+                  aria-invalid={Boolean(getFieldError("phoneNumber"))}
+                  aria-describedby="signup-phone-hint"
+                  disabled={loading}
+                />
+                <p id="signup-phone-hint" className="field-hint">
+                  Must be exactly 11 digits starting with 09 (e.g. 09171234567).
+                </p>
+                {getFieldError("phoneNumber") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("phoneNumber")}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="form-grid-two">
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-password">
+                  Password
+                </label>
+                <div className="input-with-icon">
+                  <Lock size={16} className="input-leading-icon" aria-hidden="true" />
+                  <input
+                    id="signup-password"
+                    className={`form-input has-leading-icon has-trailing-action ${
+                      getFieldError("password") ? "form-input-error" : ""
+                    }`}
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="At least 12 characters"
+                    value={form.password}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    onKeyDown={handlePasswordKeyEvent}
+                    onKeyUp={handlePasswordKeyEvent}
+                    autoComplete="new-password"
+                    aria-invalid={Boolean(getFieldError("password"))}
+                    disabled={loading}
+                    required
+                  />
+                  <button
+                    className="password-toggle-btn"
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} aria-hidden="true" />
+                    ) : (
+                      <Eye size={18} aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                {getFieldError("password") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("password")}
+                  </p>
+                )}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-confirmPassword">
+                  Confirm password
+                </label>
+                <div className="input-with-icon">
+                  <Lock size={16} className="input-leading-icon" aria-hidden="true" />
+                  <input
+                    id="signup-confirmPassword"
+                    className={`form-input has-leading-icon has-trailing-action ${
+                      getFieldError("confirmPassword") ? "form-input-error" : ""
+                    }`}
+                    name="confirmPassword"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Re-enter your password"
+                    value={form.confirmPassword}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    onKeyDown={handlePasswordKeyEvent}
+                    onKeyUp={handlePasswordKeyEvent}
+                    autoComplete="new-password"
+                    aria-invalid={Boolean(getFieldError("confirmPassword"))}
+                    disabled={loading}
+                    required
+                  />
+                  <button
+                    className="password-toggle-btn"
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    aria-label={showPassword ? "Hide passwords" : "Show passwords"}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} aria-hidden="true" />
+                    ) : (
+                      <Eye size={18} aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                {getFieldError("confirmPassword") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("confirmPassword")}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {capsLockOn && (
+              <p role="status" className="field-warning">
+                <KeyRound size={14} aria-hidden="true" />
+                Caps Lock is on — passwords are case-sensitive.
               </p>
             )}
-          </div>
 
-          <button
-            className="button button-primary auth-submit-btn"
-            type="submit"
-            disabled={loading || lookupsLoading}
-          >
-            {loading ? "Creating account..." : "Create student account"}
-            <ArrowRight size={16} aria-hidden="true" />
-          </button>
-        </form>
+            <PasswordGuidance password={form.password} />
+
+            <div className="form-grid-two">
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-barangayId">
+                  Barangay (Tagbilaran City)
+                </label>
+                <select
+                  id="signup-barangayId"
+                  className={`form-input ${getFieldError("barangayId") ? "form-input-error" : ""}`}
+                  name="barangayId"
+                  value={form.barangayId}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  aria-invalid={Boolean(getFieldError("barangayId"))}
+                  disabled={loading || lookupsLoading}
+                  required
+                >
+                  <option value="">
+                    {lookupsLoading ? "Loading barangays..." : "Select your barangay"}
+                  </option>
+                  {barangays.map((b) => (
+                    <option key={b.barangay_id} value={b.barangay_id}>
+                      {b.barangay_name}
+                    </option>
+                  ))}
+                </select>
+                {getFieldError("barangayId") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("barangayId")}
+                  </p>
+                )}
+              </div>
+
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-schoolId">
+                  School or university
+                </label>
+                <select
+                  id="signup-schoolId"
+                  className={`form-input ${getFieldError("schoolId") ? "form-input-error" : ""}`}
+                  name="schoolId"
+                  value={form.schoolId}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  aria-invalid={Boolean(getFieldError("schoolId"))}
+                  disabled={loading || lookupsLoading}
+                  required
+                >
+                  <option value="">
+                    {lookupsLoading ? "Loading schools..." : "Select your school"}
+                  </option>
+                  {schools.map((s) => (
+                    <option key={s.school_id} value={s.school_id}>
+                      {s.school_name}
+                    </option>
+                  ))}
+                </select>
+                {getFieldError("schoolId") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("schoolId")}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="form-grid-two">
+              <div className="form-field">
+                <label className="form-label" htmlFor="signup-studentNumber">
+                  Student ID number
+                </label>
+                <input
+                  id="signup-studentNumber"
+                  className={`form-input ${
+                    getFieldError("studentNumber") ? "form-input-error" : ""
+                  }`}
+                  name="studentNumber"
+                  placeholder="e.g. 2024-00123"
+                  value={form.studentNumber}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  aria-invalid={Boolean(getFieldError("studentNumber"))}
+                  disabled={loading}
+                  required
+                />
+                {getFieldError("studentNumber") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("studentNumber")}
+                  </p>
+                )}
+              </div>
+
+              <div className="form-field">
+                <div className="form-label-row">
+                  <label className="form-label" htmlFor="signup-yearLevel">
+                    Year level
+                  </label>
+                  <span className="form-label-meta">Optional</span>
+                </div>
+                <select
+                  id="signup-yearLevel"
+                  className={`form-input ${getFieldError("yearLevel") ? "form-input-error" : ""}`}
+                  name="yearLevel"
+                  value={form.yearLevel}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  disabled={loading}
+                >
+                  <option value="">Select year level</option>
+                  {YEAR_LEVEL_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+                {getFieldError("yearLevel") && (
+                  <p role="alert" className="field-error">
+                    {getFieldError("yearLevel")}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="form-field">
+              <label className="form-label" htmlFor="signup-course">
+                Course or degree program
+              </label>
+              <input
+                id="signup-course"
+                className={`form-input ${getFieldError("course") ? "form-input-error" : ""}`}
+                name="course"
+                placeholder="e.g. BS Information Technology"
+                value={form.course}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                aria-invalid={Boolean(getFieldError("course"))}
+                disabled={loading}
+                required
+              />
+              {getFieldError("course") && (
+                <p role="alert" className="field-error">
+                  {getFieldError("course")}
+                </p>
+              )}
+            </div>
+
+            <button
+              className="button button-primary auth-submit-btn"
+              type="submit"
+              disabled={loading || lookupsLoading}
+            >
+              {loading ? "Creating account..." : "Create student account"}
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </form>
+        </div>
       </div>
 
       <div className="page-actions">

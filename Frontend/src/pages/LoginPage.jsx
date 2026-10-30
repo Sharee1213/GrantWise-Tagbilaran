@@ -8,6 +8,7 @@ import {
   KeyRound,
   Lock,
   Mail,
+  ShieldCheck,
 } from "lucide-react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import PageHeading from "../components/PageHeading.jsx";
@@ -224,149 +225,168 @@ export default function LoginPage() {
         description="Students, LGU Program Admins, Barangay Coordinators, and School Registrars sign in here. After authentication, GrantWise verifies your role and organizational assignment and redirects you to your dashboard."
       />
 
-      <div className="auth-card">
-        {notice && (
-          <div role="status" className="auth-banner auth-banner-success">
-            <CheckCircle2 size={18} aria-hidden="true" />
-            <div>
-              <strong>Account ready</strong>
-              <p>{notice}</p>
-            </div>
+      <div className="auth-card auth-card-split">
+        <aside className="auth-brand-panel">
+          <div className="auth-brand-mark" aria-hidden="true">
+            <ShieldCheck size={28} />
           </div>
-        )}
+          <div className="auth-brand-copy">
+            <h2>Access every grant workflow in one secure place.</h2>
+            <p>
+              GrantWise keeps student records, program eligibility, and barangay coordination aligned with the same verified data.
+            </p>
+          </div>
+          <ul className="auth-brand-benefits">
+            <li>Track application status and next steps</li>
+            <li>Coordinate school and barangay support</li>
+            <li>Verify role-based access with confidence</li>
+          </ul>
+        </aside>
 
-        {error && (
-          <div role="alert" className="auth-banner auth-banner-error">
-            <AlertCircle size={18} aria-hidden="true" />
-            <div>
-              <strong>Unable to sign in</strong>
-              <p>{error}</p>
-              {failedAttempts >= 2 && (
-                <p className="auth-banner-hint">
-                  Tip: Make sure your email spelling is exact and check whether
-                  Caps Lock is enabled. Student passwords are at least 12
-                  characters long.
+        <div className="auth-form-panel">
+          {notice && (
+            <div role="status" className="auth-banner auth-banner-success">
+              <CheckCircle2 size={18} aria-hidden="true" />
+              <div>
+                <strong>Account ready</strong>
+                <p>{notice}</p>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div role="alert" className="auth-banner auth-banner-error">
+              <AlertCircle size={18} aria-hidden="true" />
+              <div>
+                <strong>Unable to sign in</strong>
+                <p>{error}</p>
+                {failedAttempts >= 2 && (
+                  <p className="auth-banner-hint">
+                    Tip: Make sure your email spelling is exact and check whether
+                    Caps Lock is enabled. Student passwords are at least 12
+                    characters long.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="auth-form" noValidate>
+            <div className="form-field">
+              <label className="form-label" htmlFor="login-email">
+                Email address
+              </label>
+              <div className="input-with-icon">
+                <Mail size={16} className="input-leading-icon" aria-hidden="true" />
+                <input
+                  ref={emailInputRef}
+                  id="login-email"
+                  name="email"
+                  className={`form-input has-leading-icon ${emailError ? "form-input-error" : ""}`}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="name@school.edu.ph"
+                  value={email}
+                  onChange={handleEmailChange}
+                  onBlur={handleEmailBlur}
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={emailError ? "login-email-error" : undefined}
+                  disabled={loading}
+                  required
+                />
+              </div>
+              {emailError && (
+                <p id="login-email-error" role="alert" className="field-error">
+                  {emailError}
                 </p>
               )}
             </div>
-          </div>
-        )}
 
-        <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          <div className="form-field">
-            <label className="form-label" htmlFor="login-email">
-              Email address
-            </label>
-            <div className="input-with-icon">
-              <Mail size={16} className="input-leading-icon" aria-hidden="true" />
-              <input
-                ref={emailInputRef}
-                id="login-email"
-                name="email"
-                className={`form-input has-leading-icon ${emailError ? "form-input-error" : ""}`}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="name@school.edu.ph"
-                value={email}
-                onChange={handleEmailChange}
-                onBlur={handleEmailBlur}
-                aria-invalid={Boolean(emailError)}
-                aria-describedby={emailError ? "login-email-error" : undefined}
-                disabled={loading}
-                required
-              />
-            </div>
-            {emailError && (
-              <p id="login-email-error" role="alert" className="field-error">
-                {emailError}
-              </p>
-            )}
-          </div>
+            <div className="form-field">
+              <div className="form-label-row">
+                <label className="form-label" htmlFor="login-password">
+                  Password
+                </label>
+                <span className="form-label-meta">Case-sensitive</span>
+              </div>
+              <div className="input-with-icon">
+                <Lock size={16} className="input-leading-icon" aria-hidden="true" />
+                <input
+                  ref={passwordInputRef}
+                  id="login-password"
+                  name="password"
+                  className={`form-input has-leading-icon has-trailing-action ${
+                    passwordError ? "form-input-error" : ""
+                  }`}
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={handlePasswordChange}
+                  onBlur={handlePasswordBlur}
+                  onKeyDown={handlePasswordKeyEvent}
+                  onKeyUp={handlePasswordKeyEvent}
+                  autoComplete="current-password"
+                  aria-invalid={Boolean(passwordError)}
+                  aria-describedby={
+                    [
+                      passwordError ? "login-password-error" : null,
+                      capsLockOn ? "login-capslock-warning" : null,
+                      showShortPasswordHint ? "login-password-hint" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                  disabled={loading}
+                  required
+                />
+                <button
+                  className="password-toggle-btn"
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  tabIndex={0}
+                >
+                  {showPassword ? (
+                    <EyeOff size={18} aria-hidden="true" />
+                  ) : (
+                    <Eye size={18} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
 
-          <div className="form-field">
-            <div className="form-label-row">
-              <label className="form-label" htmlFor="login-password">
-                Password
-              </label>
-              <span className="form-label-meta">Case-sensitive</span>
-            </div>
-            <div className="input-with-icon">
-              <Lock size={16} className="input-leading-icon" aria-hidden="true" />
-              <input
-                ref={passwordInputRef}
-                id="login-password"
-                name="password"
-                className={`form-input has-leading-icon has-trailing-action ${
-                  passwordError ? "form-input-error" : ""
-                }`}
-                type={showPassword ? "text" : "password"}
-                placeholder="Enter your password"
-                value={password}
-                onChange={handlePasswordChange}
-                onBlur={handlePasswordBlur}
-                onKeyDown={handlePasswordKeyEvent}
-                onKeyUp={handlePasswordKeyEvent}
-                autoComplete="current-password"
-                aria-invalid={Boolean(passwordError)}
-                aria-describedby={
-                  [
-                    passwordError ? "login-password-error" : null,
-                    capsLockOn ? "login-capslock-warning" : null,
-                    showShortPasswordHint ? "login-password-hint" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" ") || undefined
-                }
-                disabled={loading}
-                required
-              />
-              <button
-                className="password-toggle-btn"
-                type="button"
-                onClick={() => setShowPassword((visible) => !visible)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                aria-pressed={showPassword}
-                tabIndex={0}
-              >
-                {showPassword ? (
-                  <EyeOff size={18} aria-hidden="true" />
-                ) : (
-                  <Eye size={18} aria-hidden="true" />
-                )}
-              </button>
+              {capsLockOn && (
+                <p id="login-capslock-warning" role="status" className="field-warning">
+                  <KeyRound size={14} aria-hidden="true" />
+                  Caps Lock is on — passwords are case-sensitive.
+                </p>
+              )}
+
+              {passwordError && (
+                <p id="login-password-error" role="alert" className="field-error">
+                  {passwordError}
+                </p>
+              )}
+
+              {showShortPasswordHint && (
+                <p id="login-password-hint" className="field-hint">
+                  Note: Standard GrantWise accounts use passwords with 12 or more
+                  characters.
+                </p>
+              )}
             </div>
 
-            {capsLockOn && (
-              <p id="login-capslock-warning" role="status" className="field-warning">
-                <KeyRound size={14} aria-hidden="true" />
-                Caps Lock is on — passwords are case-sensitive.
-              </p>
-            )}
-
-            {passwordError && (
-              <p id="login-password-error" role="alert" className="field-error">
-                {passwordError}
-              </p>
-            )}
-
-            {showShortPasswordHint && (
-              <p id="login-password-hint" className="field-hint">
-                Note: Standard GrantWise accounts use passwords with 12 or more
-                characters.
-              </p>
-            )}
-          </div>
-
-          <button
-            className="button button-primary auth-submit-btn"
-            type="submit"
-            disabled={loading}
-          >
-            {loading ? "Signing in..." : "Sign in"}
-            <ArrowRight size={16} aria-hidden="true" />
-          </button>
-        </form>
+            <button
+              className="button button-primary auth-submit-btn"
+              type="submit"
+              disabled={loading}
+            >
+              {loading ? "Signing in..." : "Sign in"}
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </form>
+        </div>
       </div>
 
       <div className="page-actions">

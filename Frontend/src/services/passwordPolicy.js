@@ -1,6 +1,19 @@
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 
+export function getPasswordRuleChecks(password = "") {
+  const value = String(password ?? "");
+  const trimmed = value.trim();
+
+  return {
+    length: value.length >= PASSWORD_MIN_LENGTH && value.length <= PASSWORD_MAX_LENGTH,
+    nonWhitespace: trimmed.length > 0,
+    hasLetter: /[A-Za-z]/.test(value),
+    hasNumber: /\d/.test(value),
+    hasSymbol: /[^A-Za-z0-9\s]/.test(value),
+  };
+}
+
 export function getNewPasswordError(password) {
   if (!password) return "Password is required.";
   if (password.length < PASSWORD_MIN_LENGTH) {
@@ -16,14 +29,21 @@ export function getNewPasswordError(password) {
 }
 
 export function getPasswordStrength(password) {
-  if (!password) return { label: "Not rated", value: 0 };
+  if (!password) {
+    return { label: "Not rated", value: 0, passed: 0, total: 5 };
+  }
+
+  const checks = getPasswordRuleChecks(password);
+  const total = Object.keys(checks).length;
+  const passed = Object.values(checks).filter(Boolean).length;
+  const value = Math.round((passed / total) * 100);
+
   if (password.trim().length === 0) {
-    return { label: "Needs non-space characters", value: 0 };
+    return { label: "Needs non-space characters", value: 0, passed: 0, total };
   }
-  if (password.length < PASSWORD_MIN_LENGTH) {
-    return { label: "Weak", value: 25 };
-  }
-  if (password.length < 16) return { label: "Fair", value: 50 };
-  if (password.length < 24) return { label: "Good", value: 75 };
-  return { label: "Strong", value: 100 };
+
+  if (passed <= 2) return { label: "Weak", value: Math.max(25, value), passed, total };
+  if (passed <= 4) return { label: "Fair", value: Math.max(50, value), passed, total };
+  if (passed === 5) return { label: "Strong", value: 100, passed, total };
+  return { label: "Good", value: Math.max(75, value), passed, total };
 }
