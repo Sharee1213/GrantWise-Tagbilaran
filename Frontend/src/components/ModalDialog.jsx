@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 const FOCUSABLE_SELECTOR = [
@@ -22,11 +22,26 @@ export default function ModalDialog({
   const modalRef = useRef(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const [isClosing, setIsClosing] = useState(false);
 
   // Keep the latest onClose without re-running the focus effect on every render.
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setIsClosing(false);
+      return undefined;
+    }
+
+    setIsClosing(true);
+    const closeTimer = window.setTimeout(() => {
+      setIsClosing(false);
+    }, 160);
+
+    return () => clearTimeout(closeTimer);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -80,18 +95,18 @@ export default function ModalDialog({
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !isClosing) return null;
 
   return (
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop ${isClosing ? "is-closing" : ""}`}
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className={`modal-dialog ${maxWidth} ${className}`}
+        className={`modal-dialog ${maxWidth} ${className} ${isClosing ? "is-closing" : ""}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

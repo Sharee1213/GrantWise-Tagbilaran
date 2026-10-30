@@ -696,6 +696,11 @@ export default function StaffPortalPage() {
                     Number(data.summary?.remaining_budget || 0) -
                       Number(data.summary?.reserved_budget || 0),
                   )}
+                  numericValue={
+                    Number(data.summary?.remaining_budget || 0) -
+                    Number(data.summary?.reserved_budget || 0)
+                  }
+                  format={(value) => formatPhp(value)}
                   subtext={`Total: ${formatPhp(data.summary?.total_budget || 0)}`}
                   icon={Building2}
                   variant="success"

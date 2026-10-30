@@ -1,4 +1,5 @@
 import React from "react";
+import useCountUp from "../hooks/useCountUp.js";
 
 export default function StatCard({
   title,
@@ -9,8 +10,24 @@ export default function StatCard({
   badge,
   className = "",
   onClick,
+  numericValue,
+  format,
 }) {
   const isClickable = typeof onClick === "function";
+  const shouldAnimate =
+    numericValue !== undefined &&
+    numericValue !== null &&
+    typeof format === "function";
+
+  const animatedValue = useCountUp(
+    shouldAnimate ? Number(numericValue) : value ?? 0,
+    {
+      enabled: shouldAnimate,
+      format: typeof format === "function" ? format : (raw) => raw ?? "—",
+    },
+  );
+
+  const displayValue = shouldAnimate ? animatedValue : value ?? "—";
 
   return (
     <article
@@ -39,7 +56,7 @@ export default function StatCard({
       </div>
 
       <div className="stat-card-body">
-        <div className="stat-card-value">{value ?? "—"}</div>
+        <div className="stat-card-value">{displayValue}</div>
         {badge && <span className="stat-card-badge">{badge}</span>}
       </div>
 

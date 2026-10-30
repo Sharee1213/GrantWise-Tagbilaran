@@ -1629,6 +1629,46 @@ textarea:focus {
    MODAL DIALOGS & CONFIRMATIONS
    ========================================================================== */
 
+@keyframes backdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes backdropOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialogIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dialogOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1638,6 +1678,11 @@ textarea:focus {
   display: grid;
   place-items: center;
   padding: 20px;
+  animation: backdropIn 200ms ease-out;
+}
+
+.modal-backdrop.is-closing {
+  animation: backdropOut 200ms ease-in forwards;
 }
 
 .modal-dialog {
@@ -1650,6 +1695,12 @@ textarea:focus {
   flex-direction: column;
   max-height: 90vh;
   overflow: hidden;
+  animation: dialogIn 200ms ease-out;
+  transform-origin: center;
+}
+
+.modal-dialog.is-closing {
+  animation: dialogOut 200ms ease-in forwards;
 }
 
 .modal-header {
