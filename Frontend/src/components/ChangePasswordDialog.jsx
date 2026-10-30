@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertCircle, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
 import ModalDialog from "./ModalDialog.jsx";
 import PasswordGuidance from "./PasswordGuidance.jsx";
 import { useToast } from "../context/ToastContext.jsx";
@@ -113,20 +113,32 @@ export default function ChangePasswordDialog({ isOpen, onClose }) {
         <label className="form-label" htmlFor={`change-${name}`}>
           {label}
         </label>
-        <input
-          id={`change-${name}`}
-          name={name}
-          type={inputType}
-          className={`form-input ${message ? "form-input-error" : ""}`}
-          value={form[name]}
-          onChange={handleChange}
-          autoComplete={autoComplete}
-          aria-invalid={Boolean(message)}
-          aria-describedby={message ? `change-${name}-error` : undefined}
-          disabled={saving || Boolean(success)}
-          maxLength={128}
-          required
-        />
+        <div className="input-with-icon">
+          <Lock size={16} className="input-leading-icon" aria-hidden="true" />
+          <input
+            id={`change-${name}`}
+            name={name}
+            type={inputType}
+            className={`form-input has-leading-icon has-trailing-action ${message ? "form-input-error" : ""}`}
+            value={form[name]}
+            onChange={handleChange}
+            autoComplete={autoComplete}
+            aria-invalid={Boolean(message)}
+            aria-describedby={message ? `change-${name}-error` : undefined}
+            disabled={saving || Boolean(success)}
+            maxLength={128}
+            required
+          />
+          <button
+            type="button"
+            className="password-toggle-btn"
+            onClick={() => setShowPasswords((visible) => !visible)}
+            aria-label={showPasswords ? "Hide passwords" : "Show passwords"}
+            aria-pressed={showPasswords}
+          >
+            {showPasswords ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+          </button>
+        </div>
         {message && (
           <p id={`change-${name}-error`} role="alert" className="field-error">
             {message}

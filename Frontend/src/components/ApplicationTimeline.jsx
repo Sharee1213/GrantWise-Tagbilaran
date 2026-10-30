@@ -9,8 +9,33 @@ import {
   XCircle,
 } from "lucide-react";
 import StatusBadge from "./StatusBadge.jsx";
+import { AnimatedCheckMark } from "./ToastRegion.jsx";
 
-const WORKFLOW_STEPS = [
+const VERIFICATION_STAGES = [
+  {
+    key: "barangay_verification",
+    verificationType: "barangay",
+    label: "Barangay Verification",
+    description: "Barangay Coordinator verifies applicant residency.",
+    icon: Clock,
+  },
+  {
+    key: "registrar_verification",
+    verificationType: "registrar",
+    label: "Registrar Verification",
+    description: "School Registrar verifies academic enrollment and standing.",
+    icon: School,
+  },
+  {
+    key: "lgu_review",
+    verificationType: "lgu",
+    label: "LGU Final Review",
+    description: "LGU Admin verifies duplicate grant checks and quota limits.",
+    icon: Landmark,
+  },
+];
+
+const APPLICATION_STEPS = [
   {
     key: "draft",
     label: "Draft Application",
@@ -23,24 +48,7 @@ const WORKFLOW_STEPS = [
     description: "Online submission confirmed and queued for municipal verification.",
     icon: FileCheck,
   },
-  {
-    key: "barangay_verification",
-    label: "Barangay Verification",
-    description: "Barangay Coordinator verifies applicant residency.",
-    icon: Clock,
-  },
-  {
-    key: "registrar_verification",
-    label: "Registrar Verification",
-    description: "School Registrar verifies academic enrollment and standing.",
-    icon: School,
-  },
-  {
-    key: "lgu_review",
-    label: "LGU Final Review",
-    description: "LGU Admin verifies duplicate grant checks and quota limits.",
-    icon: Landmark,
-  },
+  ...VERIFICATION_STAGES,
   {
     key: "approved",
     label: "Award Approved & Reserved",
@@ -49,27 +57,32 @@ const WORKFLOW_STEPS = [
   },
 ];
 
-function getActiveStepIndex(status) {
-  const norm = String(status || "").toLowerCase().trim();
-  switch (norm) {
-    case "draft":
-      return 0;
-    case "submitted":
-      return 1;
-    case "barangay_verification":
-      return 2;
-    case "registrar_verification":
-      return 3;
-    case "lgu_review":
-      return 4;
-    case "approved":
-      return 5;
-    case "rejected":
-    case "withdrawn":
-      return -1;
-    default:
-      return 1;
-  }
+const STATUS_STEP_INDEX = {
+  draft: 0,
+  submitted: 1,
+  barangay_verification: 2,
+  registrar_verification: 3,
+  lgu_review: 4,
+  approved: 5,
+  rejected: -1,
+  withdrawn: -1,
+};
+
+function resolveStageKey(verificationType) {
+  const normalized = String(verificationType || "").trim().toLowerCase();
+  if (normalized === "barangay") return "barangay_verification";
+  if (normalized === "registrar") return "registrar_verification";
+  if (normalized === "lgu") return "lgu_review";
+  return normalized;
+}
+
+function getVerificationStatusMap(verifications = []) {
+  return verifications.reduce((acc, verification) => {
+    const type = String(verification?.verification_type || "").trim().toLowerCase();
+    if (!type) return acc;
+    acc[type] = String(verification?.status || "pending").trim().toLowerCase();
+    return acc;
+  }, {});
 }
 
 export default function ApplicationTimeline({
@@ -78,11 +91,55 @@ export default function ApplicationTimeline({
   reviewedAt,
   remarks,
   verifications = [],
+  claimStatus,
   className = "",
 }) {
-  const activeStep = getActiveStepIndex(status);
-  const isRejected = status === "rejected";
-  const isWithdrawn = status === "withdrawn";
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const verificationStatusMap = getVerificationStatusMap(verifications);
+  const infoRequestedStage = verifications.find(
+    (verification) => String(verification?.status || "").trim().toLowerCase() === "needs_information",
+  )?.verification_type;
+  const isRejected = normalizedStatus === "rejected";
+  const isWithdrawn = normalizedStatus === "withdrawn";
+  const isClaimed = String(claimStatus || "").trim().toLowerCase() === "claimed";
+
+  const currentStepKey = (() => {
+    if (isRejected || isWithdrawn) return "rejected";
+    if (normalizedStatus === "approved") return "approved";
+    if (infoRequestedStage) return resolveStageKey(infoRequestedStage);
+    if (normalizedStatus in STATUS_STEP_INDEX) return normalizedStatus;
+    return "submitted";
+  })();
+
+  const steps = APPLICATION_STEPS.map((step, index) => {
+    const isFinalStep = step.key === "approved";
+    const isVerificationStep = step.key.includes("verification") || step.key === "lgu_review";
+    const verificationState = isVerificationStep
+      ? verificationStatusMap[step.key.replace("_verification", "").replace("_review", "")]
+      : null;
+
+    const completionIndex = STATUS_STEP_INDEX[normalizedStatus] ?? 1;
+    const isCompleted =
+      (isFinalStep && normalizedStatus === "approved") ||
+      (!isRejected && !isWithdrawn && completionIndex > index) ||
+      (verificationState === "approved" && index < APPLICATION_STEPS.length - 1) ||
+      (verificationState === "rejected" && isVerificationStep && index === APPLICATION_STEPS.length - 2);
+    const isInfoRequested =
+      !isRejected &&
+      !isWithdrawn &&
+      Boolean(infoRequestedStage) &&
+      step.key === `${infoRequestedStage}_verification`;
+    const isCurrent = currentStepKey === step.key;
+    const isClaimedStep = isClaimed && isFinalStep;
+
+    return {
+      ...step,
+      isCompleted,
+      isCurrent,
+      isInfoRequested,
+      isClaimedStep,
+    };
+  });
 
   return (
     <div className={`application-timeline-card ${className}`}>
@@ -95,16 +152,16 @@ export default function ApplicationTimeline({
       </div>
 
       <div className="timeline-steps-container">
-        {WORKFLOW_STEPS.map((step, idx) => {
-          const isCompleted = activeStep > idx || activeStep === 5;
-          const isCurrent = activeStep === idx;
+        {steps.map((step, idx) => {
           const StepIcon = step.icon;
 
           let stepStateClass = "is-upcoming";
-          if (isCompleted) stepStateClass = "is-completed";
-          else if (isCurrent) stepStateClass = "is-current";
+          if (step.isClaimedStep) stepStateClass = "is-claimed";
+          else if (step.isCompleted) stepStateClass = "is-completed";
+          else if (step.isInfoRequested) stepStateClass = "is-info-requested";
+          else if (step.isCurrent) stepStateClass = "is-current";
 
-          if (isRejected && activeStep === -1 && idx === 4) {
+          if (isRejected && idx === APPLICATION_STEPS.length - 2) {
             stepStateClass = "is-rejected";
           }
 
@@ -112,13 +169,15 @@ export default function ApplicationTimeline({
             <div key={step.key} className={`timeline-step ${stepStateClass}`}>
               <div className="timeline-step-indicator">
                 <span className="timeline-step-circle">
-                  {isCompleted ? (
+                  {step.isClaimedStep ? (
+                    <AnimatedCheckMark className="timeline-checkmark" />
+                  ) : step.isCompleted || (isRejected && idx === APPLICATION_STEPS.length - 2) ? (
                     <CheckCircle2 size={16} aria-hidden="true" />
                   ) : (
                     <StepIcon size={15} aria-hidden="true" />
                   )}
                 </span>
-                {idx < WORKFLOW_STEPS.length - 1 && <span className="timeline-step-connector" />}
+                {idx < steps.length - 1 && <span className="timeline-step-connector" />}
               </div>
 
               <div className="timeline-step-details">
@@ -129,7 +188,7 @@ export default function ApplicationTimeline({
                     Submitted: {new Date(submittedAt).toLocaleDateString("en-PH")}
                   </span>
                 )}
-                {step.key === "approved" && reviewedAt && isCompleted && (
+                {step.key === "approved" && reviewedAt && (step.isCompleted || step.isClaimedStep) && (
                   <span className="timeline-timestamp">
                     Approved: {new Date(reviewedAt).toLocaleDateString("en-PH")}
                   </span>
