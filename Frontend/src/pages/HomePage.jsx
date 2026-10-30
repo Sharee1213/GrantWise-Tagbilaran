@@ -12,6 +12,12 @@ import {
 import { Link } from "react-router-dom";
 import useReveal from "../hooks/useReveal.js";
 
+const heroTrustItems = [
+  { icon: Landmark, label: "City funding" },
+  { icon: UsersRound, label: "Barangays" },
+  { icon: GraduationCap, label: "Schools" },
+];
+
 const programFeatures = [
   {
     icon: Landmark,
@@ -73,36 +79,50 @@ export default function HomePage() {
   return (
     <div className="page-container">
       <section className="hero">
-        <div className="hero-content">
-          <p className="eyebrow">
-            <span className="eyebrow-rule" />
-            TAGBILARAN CITY · SCHOLARSHIP SUPPORT
-          </p>
-          <h1>
-            Opportunity for learners.
-            <br />
-            <span>Progress for our city.</span>
-          </h1>
-          <p className="hero-description">
-            A scholarship and educational grant portal in development for
-            Tagbilaran City students, schools, barangays, and program teams.
-          </p>
-          <div className="hero-actions">
-            <Link className="button button-primary" to="/programs">
-              Explore programs
-              <ArrowRight size={17} aria-hidden="true" />
-            </Link>
-            <Link className="button button-outline" to="/application-guide">
-              Application guide
-            </Link>
+        <div className="hero-layout">
+          <div className="hero-content">
+            <p className="eyebrow">
+              <span className="eyebrow-rule" />
+              TAGBILARAN CITY · SCHOLARSHIP SUPPORT
+            </p>
+            <h1>
+              Opportunity for learners.
+              <br />
+              <span>Progress for our city.</span>
+            </h1>
+            <p className="hero-description">
+              A scholarship and educational grant portal in development for
+              Tagbilaran City students, schools, barangays, and program teams.
+            </p>
+            <div className="hero-actions">
+              <Link className="button button-primary" to="/programs">
+                Explore programs
+                <ArrowRight size={17} aria-hidden="true" />
+              </Link>
+              <Link className="button button-outline" to="/application-guide">
+                Application guide
+              </Link>
+            </div>
+            <div className="hero-trust" aria-label="Support network">
+              {heroTrustItems.map(({ icon: Icon, label }, index) => (
+                <div className="trust-item" key={label} style={{ "--i": index }}>
+                  <Icon size={14} aria-hidden="true" />
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="hero-side" aria-hidden="true">
+            <div className="hero-seal">
+              <div className="seal-ring">
+                <Landmark size={56} strokeWidth={1.2} />
+                <span>TAGBILARAN</span>
+              </div>
+            </div>
           </div>
         </div>
-        <div className="hero-seal" aria-hidden="true">
-          <div className="seal-ring">
-            <Landmark size={47} strokeWidth={1.1} />
-            <span>TAGBILARAN</span>
-          </div>
-        </div>
+
         <div className="hero-caption">
           <span className="caption-dot" />
           Built around local scholarship workflows
