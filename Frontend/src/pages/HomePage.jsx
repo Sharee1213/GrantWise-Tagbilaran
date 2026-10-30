@@ -10,6 +10,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import useReveal from "../hooks/useReveal.js";
 
 const programFeatures = [
   {
@@ -53,6 +54,20 @@ const applicationSteps = [
       "Submit only when a program is open and the student portal confirms online submission is available.",
   },
 ];
+
+function RevealItem({ as: Component = "article", className, index, children }) {
+  const { ref, isVisible } = useReveal();
+
+  return (
+    <Component
+      ref={ref}
+      className={`${className} reveal ${isVisible ? "is-visible" : ""}`.trim()}
+      style={{ "--i": index }}
+    >
+      {children}
+    </Component>
+  );
+}
 
 export default function HomePage() {
   return (
@@ -112,7 +127,7 @@ export default function HomePage() {
 
         <div className="pillar-grid">
           {programFeatures.map(({ icon: Icon, title, description }, index) => (
-            <article className="pillar-card" key={title}>
+            <RevealItem className="pillar-card" index={index} key={title}>
               <div className="pillar-card-top">
                 <span className="pillar-icon">
                   <Icon size={20} strokeWidth={1.8} aria-hidden="true" />
@@ -121,7 +136,7 @@ export default function HomePage() {
               </div>
               <h3>{title}</h3>
               <p>{description}</p>
-            </article>
+            </RevealItem>
           ))}
         </div>
         <div className="section-action">
@@ -146,8 +161,8 @@ export default function HomePage() {
         </div>
         <div className="steps-grid">
           {applicationSteps.map(
-            ({ icon: Icon, number, title, description }) => (
-              <article className="step-card" key={number}>
+            ({ icon: Icon, number, title, description }, index) => (
+              <RevealItem className="step-card" index={index} key={number}>
                 <div className="step-card-top">
                   <span className="step-icon">
                     <Icon size={19} aria-hidden="true" />
@@ -156,7 +171,7 @@ export default function HomePage() {
                 </div>
                 <h3>{title}</h3>
                 <p>{description}</p>
-              </article>
+              </RevealItem>
             ),
           )}
         </div>
