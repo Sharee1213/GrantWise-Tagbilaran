@@ -40,6 +40,23 @@ function displayStatus(value) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function LoadErrorBanner({ error, onRetry }) {
+  if (!error) return null;
+
+  return (
+    <div role="alert" className="auth-banner auth-banner-error mb-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <strong>{error.message || "Unable to load this section."}</strong>
+        </div>
+        <button type="button" onClick={onRetry} className="button button-outline button-sm">
+          <RefreshCw size={14} className="mr-1.5" /> Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function StaffPortalPage() {
   const { portalType } = useParams();
   const [searchParams] = useSearchParams();
@@ -62,6 +79,12 @@ export default function StaffPortalPage() {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState("");
+
+  const loadErrors = Array.isArray(data?.loadErrors) ? data.loadErrors : [];
+  const getLoadError = useCallback(
+    (key) => loadErrors.find((entry) => entry.key === key),
+    [loadErrors],
+  );
 
   // Modals & Active Selections
   const [selectedDisbursementBarangay, setSelectedDisbursementBarangay] = useState("all");
@@ -140,6 +163,69 @@ export default function StaffPortalPage() {
       setData(null);
     }
   }, [strategy, requestPortalData]);
+
+  const retryLoadError = useCallback(
+    async (key) => {
+      if (!strategy || !requestPortalData) return;
+
+      const endpointMap = {
+        "admin/disbursements": "admin/disbursements",
+        "coordinator/grants": "coordinator/grants",
+        "coordinator/notifications": "coordinator/notifications",
+      };
+
+      const endpoint = endpointMap[key];
+      if (!endpoint) return;
+
+      try {
+        const partial = await requestPortalData(endpoint);
+
+        setData((current) => {
+          const next = { ...(current || {}) };
+
+          if (key === "admin/disbursements") {
+            next.disbursements =
+              partial && Array.isArray(partial.grants) && partial.grants.length > 0
+                ? partial
+                : next.disbursements || {
+                    grants: [],
+                    barangay_breakdown: [],
+                    audit_logs: [],
+                  };
+            next.disbursementSummaryOnly = false;
+          }
+
+          if (key === "coordinator/grants") {
+            next.grants = Array.isArray(partial?.grants) ? partial.grants : [];
+          }
+
+          if (key === "coordinator/notifications") {
+            next.notifications = Array.isArray(partial?.notifications) ? partial.notifications : [];
+          }
+
+          next.loadErrors = (Array.isArray(next.loadErrors) ? next.loadErrors : []).filter(
+            (entry) => entry.key !== key,
+          );
+
+          return next;
+        });
+      } catch (requestError) {
+        setData((current) => {
+          const next = { ...(current || {}) };
+          next.loadErrors = [
+            ...((Array.isArray(next.loadErrors) ? next.loadErrors : []).filter((entry) => entry.key !== key)),
+            {
+              key,
+              message:
+                requestError.message ||"Unable to reload this data right now.",
+            },
+          ];
+          return next;
+        });
+      }
+    },
+    [requestPortalData, strategy],
+  );
 
   useEffect(() => {
     let active = true;
@@ -862,6 +948,12 @@ export default function StaffPortalPage() {
 
               {/* Barangay Cash Disbursements & Audit Trail */}
               <section className="staff-panel" id="disbursements">
+                {getLoadError("admin/disbursements") && (
+                  <LoadErrorBanner
+                    error={getLoadError("admin/disbursements")}
+                    onRetry={() => retryLoadError("admin/disbursements")}
+                  />
+                )}
                 <div className="panel-title-bar">
                   <div>
                     <div className="flex items-center gap-2">
@@ -869,7 +961,9 @@ export default function StaffPortalPage() {
                       <h2 className="text-xl font-bold">Barangay Cash Disbursements & Student Payout Monitoring</h2>
                     </div>
                     <p className="text-muted text-xs mt-1">
-                      Real-time visibility into whether designated Tagbilaran barangays have disbursed cash assistance to approved scholars, release timestamps, coordinator notes, and complete transaction logs.
+                      {data?.disbursementSummaryOnly
+                        ? "Showing summary data only because the live cash disbursement feed could not be refreshed."
+                        : "Real-time visibility into whether designated Tagbilaran barangays have disbursed cash assistance to approved scholars, release timestamps, coordinator notes, and complete transaction logs."}
                     </p>
                   </div>
                 </div>
@@ -1276,6 +1370,13 @@ export default function StaffPortalPage() {
           {/* B. BARANGAY COORDINATOR VIEW */}
           {strategy.base === "coordinator" && (
             <>
+              {getLoadError("coordinator/notifications") && (
+                <LoadErrorBanner
+                  error={getLoadError("coordinator/notifications")}
+                  onRetry={() => retryLoadError("coordinator/notifications")}
+                />
+              )}
+
               {/* Notification Banner for New Grants */}
               {Array.isArray(data.notifications) && data.notifications.length > 0 && (
                 <div className="mb-6 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 space-y-2">
@@ -1337,6 +1438,12 @@ export default function StaffPortalPage() {
 
               {/* 1. APPROVED GRANTS & CASH DISBURSEMENT LOGS */}
               <section className="staff-panel mb-8" id="grants">
+                {getLoadError("coordinator/grants") && (
+                  <LoadErrorBanner
+                    error={getLoadError("coordinator/grants")}
+                    onRetry={() => retryLoadError("coordinator/grants")}
+                  />
+                )}
                 <div className="panel-title-bar">
                   <div>
                     <h2>Approved Barangay Grants & Cash Disbursements</h2>
