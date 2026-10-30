@@ -19,6 +19,12 @@ export default function DisbursementsPanel({
   loadError,
   onRetry,
 }) {
+  const sortedBarangayBreakdown = [...(disbursements?.barangay_breakdown || [])].sort((a, b) => {
+    const aRatio = a.total_grants > 0 ? (Number(a.claimed_grants || 0) / Number(a.total_grants)) * 100 : 0;
+    const bRatio = b.total_grants > 0 ? (Number(b.claimed_grants || 0) / Number(b.total_grants)) * 100 : 0;
+    return bRatio - aRatio;
+  });
+
   return (
     <section className="staff-panel" id="disbursements">
       {loadError && (
@@ -101,42 +107,63 @@ export default function DisbursementsPanel({
         </div>
       </div>
 
-      {Array.isArray(disbursements?.barangay_breakdown) && disbursements.barangay_breakdown.length > 0 && (
+      {Array.isArray(sortedBarangayBreakdown) && sortedBarangayBreakdown.length > 0 && (
         <div className="my-6">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-muted mb-3">
             Distribution Status by Barangay
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {disbursements.barangay_breakdown.map((b) => {
-              const isFullyDisbursed = b.total_grants > 0 && b.unclaimed_grants === 0;
+            {sortedBarangayBreakdown.map((b) => {
+              const totalGrants = Number(b.total_grants || 0);
+              const claimedGrants = Number(b.claimed_grants || 0);
+              const releasedPercentage = totalGrants > 0 ? Math.round((claimedGrants / totalGrants) * 100) : 0;
+              const radius = 18;
+              const circumference = 2 * Math.PI * radius;
+              const ringOffset = circumference - (releasedPercentage / 100) * circumference;
+              const isFullyDisbursed = totalGrants > 0 && claimedGrants >= totalGrants;
+
               return (
                 <div
                   key={b.barangay_id}
-                  className={`p-3.5 rounded-lg border text-xs transition-colors ${
+                  className={`barangay-breakdown-card ${
                     isFullyDisbursed
-                      ? "border-emerald-500/30 bg-emerald-500/5"
-                      : b.claimed_grants > 0
-                        ? "border-blue-500/30 bg-blue-500/5"
-                        : "border-[var(--border)] bg-[var(--surface)]"
+                      ? "is-fully-disbursed"
+                      : claimedGrants > 0
+                        ? "is-partial"
+                        : "is-empty"
                   }`}
                 >
-                  <div className="flex items-center justify-between font-bold text-sm text-foreground mb-1">
+                  <div className="barangay-breakdown-header">
                     <span>Brgy. {b.barangay_name}</span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[11px] font-medium ${
-                        isFullyDisbursed
-                          ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                          : b.unclaimed_grants > 0
-                            ? "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                            : "bg-[var(--border)] text-muted"
-                      }`}
-                    >
-                      {isFullyDisbursed ? "✓ 100% Disbursed" : `${b.unclaimed_grants} Pending Release`}
+                    <span className="barangay-breakdown-tag">
+                      {isFullyDisbursed ? "100% Released" : `${releasedPercentage}% Released`}
                     </span>
                   </div>
-                  <div className="flex justify-between text-muted text-[11px] mt-1">
-                    <span>Total Grants: {b.total_grants} ({formatPhp(b.total_amount)})</span>
-                    <span>Released: {formatPhp(b.disbursed_amount)}</span>
+
+                  <div className="barangay-breakdown-visual">
+                    <div className="barangay-breakdown-ring" aria-label={`${releasedPercentage}% released`} role="img">
+                      <svg viewBox="0 0 52 52" aria-hidden="true">
+                        <circle cx="26" cy="26" r={radius} className="barangay-ring-track" />
+                        <circle
+                          cx="26"
+                          cy="26"
+                          r={radius}
+                          className="barangay-ring-progress"
+                          strokeDasharray={circumference}
+                          strokeDashoffset={ringOffset}
+                        />
+                      </svg>
+                      <span>{releasedPercentage}%</span>
+                    </div>
+
+                    <div className="barangay-breakdown-meta">
+                      <span>{claimedGrants} / {totalGrants} grants claimed</span>
+                      <strong>{formatPhp(b.disbursed_amount)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="barangay-breakdown-bar" aria-hidden="true">
+                    <span style={{ width: `${releasedPercentage}%` }} />
                   </div>
                 </div>
               );
