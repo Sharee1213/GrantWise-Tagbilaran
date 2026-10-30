@@ -1763,6 +1763,9 @@ textarea:focus {
   flex: 1;
   height: 2px;
   background: var(--border-color);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 600ms ease;
 }
 
 .timeline-step.is-completed .timeline-step-circle {
@@ -1771,8 +1774,11 @@ textarea:focus {
   color: var(--badge-success-text);
 }
 
-.timeline-step.is-completed .timeline-step-connector {
-  background: var(--primary-interactive);
+.timeline-step.is-completed .timeline-step-connector,
+.timeline-step.is-info-requested .timeline-step-connector,
+.timeline-step.is-claimed .timeline-step-connector {
+  background: linear-gradient(90deg, var(--primary-interactive), var(--primary-forest));
+  transform: scaleX(1);
 }
 
 .timeline-step.is-current .timeline-step-circle {
@@ -1780,12 +1786,33 @@ textarea:focus {
   border: 2px solid var(--primary-interactive);
   color: var(--primary-interactive);
   box-shadow: 0 0 0 4px rgba(21, 128, 61, 0.15);
+  animation: pulseDot 2s infinite ease-in-out;
+}
+
+.timeline-step.is-info-requested .timeline-step-circle {
+  background: var(--badge-warning-bg);
+  border-color: rgba(180, 83, 9, 0.28);
+  color: var(--badge-warning-text);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.12);
+}
+
+.timeline-step.is-claimed .timeline-step-circle {
+  background: var(--badge-success-bg);
+  border-color: rgba(22, 101, 52, 0.28);
+  color: var(--badge-success-text);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
 }
 
 .timeline-step.is-rejected .timeline-step-circle {
   background: var(--badge-danger-bg);
   color: var(--badge-danger-text);
   border-color: #ef4444;
+}
+
+.timeline-checkmark {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
 }
 
 .timeline-step-details {
@@ -2594,6 +2621,41 @@ section h2 {
 
 .hero .eyebrow {
   color: #86efac;
+}
+
+@media (max-width: 640px) {
+  .timeline-steps-container {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-step {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .timeline-step-indicator {
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 8px;
+    height: 100%;
+  }
+
+  .timeline-step-connector {
+    width: 2px;
+    height: 20px;
+    min-height: 20px;
+    flex: none;
+    transform-origin: top center;
+    transform: scaleY(0);
+  }
+
+  .timeline-step.is-completed .timeline-step-connector,
+  .timeline-step.is-info-requested .timeline-step-connector,
+  .timeline-step.is-claimed .timeline-step-connector {
+    transform: scaleY(1);
+  }
 }
 
 @media (min-width: 900px) {
