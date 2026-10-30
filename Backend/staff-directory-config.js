@@ -119,6 +119,13 @@ const PROPOSED_BARANGAY_COORDINATOR_DIRECTORY = Object.freeze([
     { barangayName: "Ubujan", proposedEmail: "coordinator.ubujan@admin.com" }
 ]);
 
+const BLOCKED_CANDIDATE_SCHOOL_DOMAINS = Object.freeze(
+    new Set(["ub.edu.ph", "tcc.edu.ph", "pmi-bohol.edu.ph"])
+);
+
+const CANDIDATE_DOMAIN_ERROR =
+    "Your email domain is not an accepted official domain for this institution. Please use your school's approved institutional email address or contact the system administrator.";
+
 const PROPOSED_SCHOOL_REGISTRAR_DIRECTORY = Object.freeze([
     {
         dbSchoolName: "Holy Name University",
@@ -139,43 +146,43 @@ const PROPOSED_SCHOOL_REGISTRAR_DIRECTORY = Object.freeze([
     {
         dbSchoolName: "University of Bohol",
         displayName: "University of Bohol (UB)",
-        proposedEmail: "registrar@ub.edu.ph",
-        candidateDomain: "ub.edu.ph",
-        defaultDomainStatus: "candidate",
+        proposedEmail: "registrar@universityofbohol.edu.ph",
+        candidateDomain: "universityofbohol.edu.ph",
+        defaultDomainStatus: "verified",
         intendedAccess: "UB students only"
     },
     {
         dbSchoolName: "Tagbilaran City College",
         displayName: "Tagbilaran City College (TCC)",
-        proposedEmail: "registrar@tcc.edu.ph",
-        candidateDomain: "tcc.edu.ph",
+        proposedEmail: "registrar@tagbilarancitycollege.edu.ph",
+        candidateDomain: "tagbilarancitycollege.edu.ph",
         defaultDomainStatus: "verified",
         intendedAccess: "TCC students only"
     },
     {
         dbSchoolName: "PMI Colleges Main Branch",
         displayName: "PMI Colleges–Bohol",
-        proposedEmail: "registrar@pmi-bohol.edu.ph",
-        candidateDomain: "pmi-bohol.edu.ph",
-        defaultDomainStatus: "candidate",
+        proposedEmail: "registrar@pmicollegesbohol.edu.ph",
+        candidateDomain: "pmicollegesbohol.edu.ph",
+        defaultDomainStatus: "verified",
         intendedAccess: "PMI students only"
     }
 ]);
 
 const DEFAULT_SCHOOL_DOMAIN_BY_ID = Object.freeze({
-    1: ["hnu.edu.ph", "holyname.edu.ph", "holynameuniversity.edu.ph"],
-    2: ["bisu.edu.ph", "boholislandstateuniv.edu.ph", "boholislandstateuniversity.edu.ph"],
-    3: ["universityofbohol.edu.ph", "universityofbohol.ph", "ub.edu.ph"],
-    4: ["tagbilarancitycollege.edu.ph", "tcc.edu.ph"],
-    5: ["pmi-coleges.edu.ph", "pmi-colleges.edu.ph", "pmicollegesbohol.edu.ph", "pmi-bohol.edu.ph", "pmicolleges.edu.ph", "pmi.edu.ph"]
+    1: ["hnu.edu.ph"],
+    2: ["bisu.edu.ph"],
+    3: ["universityofbohol.edu.ph"],
+    4: ["tagbilarancitycollege.edu.ph"],
+    5: ["pmicollegesbohol.edu.ph"]
 });
 
 const DEFAULT_SCHOOL_DOMAIN_BY_NAME = Object.freeze({
-    "holy name university": { domain: ["hnu.edu.ph", "holyname.edu.ph", "holynameuniversity.edu.ph"], status: "verified" },
-    "bisu-tagbilaran": { domain: ["bisu.edu.ph", "boholislandstateuniv.edu.ph", "boholislandstateuniversity.edu.ph"], status: "verified" },
-    "university of bohol": { domain: ["universityofbohol.edu.ph", "universityofbohol.ph", "ub.edu.ph"], status: "verified" },
-    "tagbilaran city college": { domain: ["tagbilarancitycollege.edu.ph", "tcc.edu.ph"], status: "verified" },
-    "pmi colleges main branch": { domain: ["pmi-coleges.edu.ph", "pmi-colleges.edu.ph", "pmicollegesbohol.edu.ph", "pmi-bohol.edu.ph", "pmicolleges.edu.ph"], status: "verified" }
+    "holy name university": { domain: ["hnu.edu.ph"], status: "verified" },
+    "bisu-tagbilaran": { domain: ["bisu.edu.ph"], status: "verified" },
+    "university of bohol": { domain: ["universityofbohol.edu.ph"], status: "verified" },
+    "tagbilaran city college": { domain: ["tagbilarancitycollege.edu.ph"], status: "verified" },
+    "pmi colleges main branch": { domain: ["pmicollegesbohol.edu.ph"], status: "verified" }
 });
 
 module.exports = {
@@ -187,5 +194,7 @@ module.exports = {
     PROPOSED_BARANGAY_COORDINATOR_DIRECTORY,
     PROPOSED_SCHOOL_REGISTRAR_DIRECTORY,
     DEFAULT_SCHOOL_DOMAIN_BY_ID,
-    DEFAULT_SCHOOL_DOMAIN_BY_NAME
+    DEFAULT_SCHOOL_DOMAIN_BY_NAME,
+    BLOCKED_CANDIDATE_SCHOOL_DOMAINS,
+    CANDIDATE_DOMAIN_ERROR
 };

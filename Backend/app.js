@@ -27,6 +27,8 @@ const {
   PROPOSED_BARANGAY_COORDINATOR_DIRECTORY,
   PROPOSED_SCHOOL_REGISTRAR_DIRECTORY,
   DEFAULT_SCHOOL_DOMAIN_BY_ID,
+  BLOCKED_CANDIDATE_SCHOOL_DOMAINS,
+  CANDIDATE_DOMAIN_ERROR,
 } = require("./staff-directory-config");
 const {
   SYSTEM_ADMIN_EMAILS,
@@ -210,6 +212,7 @@ function isOfficialSchoolEmailDomain(
   schoolDomainFromDb = null,
 ) {
   if (
+    BLOCKED_CANDIDATE_SCHOOL_DOMAINS.has(domain) ||
     PERSONAL_CONSUMER_DOMAINS.has(domain) ||
     matchesDomainSet(domain, policyConfig.lguDomains) ||
     matchesDomainSet(domain, policyConfig.barangayDomains) ||
@@ -221,11 +224,11 @@ function isOfficialSchoolEmailDomain(
 
   const explicitSchoolDomains = normalizeDomainList(schoolDomainFromDb);
   if (explicitSchoolDomains.length > 0) {
-    return matchesDomainSet(domain, new Set(explicitSchoolDomains));
+    return explicitSchoolDomains.some((d) => d === domain);
   }
 
   if (policyConfig.schoolDomains.size > 0) {
-    if (matchesDomainSet(domain, policyConfig.schoolDomains)) {
+    if (policyConfig.schoolDomains.has(domain)) {
       return true;
     }
     if (policyConfig.strictSchoolDomainAllowlist) {
@@ -233,11 +236,7 @@ function isOfficialSchoolEmailDomain(
     }
   }
 
-  return (
-    matchesDomainSet(domain, DEFAULT_APPROVED_SCHOOL_DOMAINS) ||
-    (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
-    (domain.endsWith(".edu") && domain.length > ".edu".length)
-  );
+  return DEFAULT_APPROVED_SCHOOL_DOMAINS.has(domain);
 }
 
 function isOfficialLguEmailDomain(domain, policyConfig) {
@@ -332,6 +331,14 @@ function validateEmailForRole(
   }
 
   if (role === "Scholar") {
+    if (BLOCKED_CANDIDATE_SCHOOL_DOMAINS.has(domain)) {
+      return {
+        valid: false,
+        message: CANDIDATE_DOMAIN_ERROR,
+        isBlockedCandidateDomain: true,
+      };
+    }
+
     const allowGmail =
       !options.requireSchoolEmail && !policyConfig.requireStudentSchoolEmail;
     if (
@@ -347,13 +354,13 @@ function validateEmailForRole(
         message:
           expectedDomains.length > 0
             ? `The email domain (@${domain}) does not match the official domain (${expectedDomains.map((d) => `@${d}`).join(", ")}) configured for the selected school.`
-            : "Students must register using a personal Gmail address (@gmail.com) or an approved official school-issued email address (@hnu.edu.ph, @universityofbohol.edu.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph).",
+            : "Students must register using a personal Gmail address (@gmail.com) or an approved official school-issued email address (@hnu.edu.ph, @bisu.edu.ph, @universityofbohol.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph).",
       };
     }
     return {
       valid: false,
       message:
-        "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address from an approved partner institution (@hnu.edu.ph, @universityofbohol.edu.ph, @universityofbohol.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph, @pmi-coleges.edu.ph).",
+        "Students must register using a personal Gmail address (@gmail.com) or an official school-issued email address from an approved partner institution (@hnu.edu.ph, @bisu.edu.ph, @universityofbohol.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph).",
     };
   }
 
@@ -2065,6 +2072,25 @@ function createApp({
         "Email or password is invalid.",
         input.error.issues,
       );
+    }
+
+    const normalizedInputEmail = normalizeEmail(input.data.email);
+    const parsedInputEmail = parseEmailAddress(normalizedInputEmail);
+    const inputDomain = parsedInputEmail ? parsedInputEmail.domain : "";
+    const isWhitelistedOrDev =
+      Boolean(getStaffAccount(normalizedInputEmail)) ||
+      emailPolicyConfig.developerAllowlist.has(normalizedInputEmail);
+
+    if (!isWhitelistedOrDev && BLOCKED_CANDIDATE_SCHOOL_DOMAINS.has(inputDomain)) {
+      await argon2.hash(input.data.password, {
+        type: argon2.argon2id,
+        memoryCost: 19456,
+        timeCost: 2,
+        parallelism: 1,
+      });
+      return res.status(401).json({
+        message: CANDIDATE_DOMAIN_ERROR,
+      });
     }
 
     const capabilities = await getSchemaCapabilities(pool);
@@ -5705,6 +5731,21 @@ function createApp({
             message: "The school email domains schema is not installed.",
           });
         }
+        if (input.data.domainStatus === "verified") {
+          const currentDomainQuery = await pool.query(
+            'SELECT domain FROM "School_Email_Domains" WHERE domain_id = $1',
+            [domainId]
+          );
+          const domainToCheck = (input.data.domain || currentDomainQuery.rows[0]?.domain || "")
+            .trim()
+            .toLowerCase()
+            .replace(/^@+/, "");
+          if (BLOCKED_CANDIDATE_SCHOOL_DOMAINS.has(domainToCheck)) {
+            return res.status(400).json({
+              message: "Candidate domains (ub.edu.ph, tcc.edu.ph, pmi-bohol.edu.ph) cannot be verified as student registration domains.",
+            });
+          }
+        }
         const result = await pool.query(
           `SELECT sd.domain_id, sd.school_id, s.school_name, s.is_approved,
                             sd.domain, sd.domain_status, sd.is_primary,
@@ -5783,6 +5824,13 @@ function createApp({
 
         let domainRecord = null;
         if (data.domain) {
+          const normalizedDomain = data.domain.trim().toLowerCase().replace(/^@+/, "");
+          if (data.domainStatus === "verified" && BLOCKED_CANDIDATE_SCHOOL_DOMAINS.has(normalizedDomain)) {
+            await client.query("ROLLBACK");
+            return res.status(400).json({
+              message: "Candidate domains (ub.edu.ph, tcc.edu.ph, pmi-bohol.edu.ph) cannot be verified as student registration domains.",
+            });
+          }
           const insertedDomain = await client.query(
             `INSERT INTO "School_Email_Domains" (
                             school_id, domain, domain_status, is_primary, configured_by, notes
@@ -5975,5 +6023,6 @@ module.exports = {
   parseEmailAddress,
   getEmailPolicyConfig,
   validateEmailForRole,
+  isOfficialSchoolEmailDomain,
   tokenHash,
 };
