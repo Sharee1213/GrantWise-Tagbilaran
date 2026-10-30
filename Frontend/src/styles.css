@@ -1883,11 +1883,79 @@ html.js .reveal.is-visible {
   box-shadow: 0 20px 40px -15px rgba(20, 83, 45, 0.35);
 }
 
+.hero::before,
+.hero::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(18px);
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.hero::before {
+  width: 330px;
+  height: 330px;
+  left: -80px;
+  top: 30px;
+  background: radial-gradient(circle, rgba(110, 231, 183, 0.8), rgba(16, 185, 129, 0.2) 55%, transparent 72%);
+}
+
+.hero::after {
+  width: 420px;
+  height: 420px;
+  right: -100px;
+  bottom: -120px;
+  background: radial-gradient(circle, rgba(22, 163, 74, 0.85), rgba(20, 83, 45, 0.18) 52%, transparent 72%);
+}
+
 html.dark .hero {
   background:
     radial-gradient(ellipse at 84% 30%, rgba(52, 211, 153, 0.15), transparent 45%),
     linear-gradient(120deg, #091a11 0%, #102e1c 55%, #153c25 100%);
   border-color: #2b4031;
+}
+
+@keyframes heroDrift {
+  0% {
+    transform: translate3d(-12px, 18px, 0) scale(0.98);
+  }
+
+  100% {
+    transform: translate3d(18px, -10px, 0) scale(1.04);
+  }
+}
+
+@keyframes heroFloat {
+  0% {
+    transform: translateY(-56px) translate3d(0, 0, 0);
+  }
+
+  100% {
+    transform: translateY(-50px) translate3d(0, 0, 0);
+  }
+}
+
+@keyframes heroRingSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
 }
 
 .hero-content {
@@ -1947,6 +2015,49 @@ html.dark .hero {
   border: 2px dashed rgba(255, 255, 255, 0.2);
   display: grid;
   place-items: center;
+  will-change: transform;
+}
+
+@media (min-width: 900px) {
+  .hero::before,
+  .hero::after {
+    animation: heroDrift 18s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+
+  .hero .eyebrow,
+  .hero h1,
+  .hero .hero-description,
+  .hero .hero-actions {
+    opacity: 0;
+    animation: riseIn 420ms ease-out forwards;
+    will-change: transform;
+  }
+
+  .hero .eyebrow {
+    animation-delay: 0ms;
+  }
+
+  .hero h1 {
+    animation-delay: 80ms;
+  }
+
+  .hero .hero-description {
+    animation-delay: 160ms;
+  }
+
+  .hero .hero-actions {
+    animation-delay: 240ms;
+  }
+
+  .hero-seal {
+    animation: heroFloat 6s ease-in-out infinite alternate;
+  }
+
+  .seal-ring {
+    animation: heroRingSpin 40s linear infinite;
+    will-change: transform;
+  }
 }
 
 .pillar-grid,
