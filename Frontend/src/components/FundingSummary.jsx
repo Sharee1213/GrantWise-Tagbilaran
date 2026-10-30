@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { CheckCircle2, DollarSign, PieChart, ShieldAlert } from "lucide-react";
 import { formatPhp } from "../services/format.js";
 
@@ -26,6 +26,20 @@ export default function FundingSummary({
   const releasedPct = total > 0 ? Math.min(100, Math.round((released / total) * 100)) : 0;
   const reservedPct = total > 0 ? Math.min(100, Math.round((reserved / total) * 100)) : 0;
   const availablePct = Math.max(0, 100 - releasedPct - reservedPct);
+
+  const [barWidths, setBarWidths] = useState({ released: 0, reserved: 0, available: 0 });
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      setBarWidths({
+        released: releasedPct,
+        reserved: reservedPct,
+        available: availablePct,
+      });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [availablePct, releasedPct, reservedPct]);
 
   return (
     <div className={`funding-summary-widget ${className}`}>
@@ -89,17 +103,17 @@ export default function FundingSummary({
         >
           <div
             className="progress-segment segment-released"
-            style={{ width: `${releasedPct}%` }}
+            style={{ width: `${barWidths.released}%` }}
             title={`Released: ${formatPhp(released)} (${releasedPct}%)`}
           />
           <div
             className="progress-segment segment-reserved"
-            style={{ width: `${reservedPct}%` }}
+            style={{ width: `${barWidths.reserved}%` }}
             title={`Reserved: ${formatPhp(reserved)} (${reservedPct}%)`}
           />
           <div
             className="progress-segment segment-available"
-            style={{ width: `${availablePct}%` }}
+            style={{ width: `${barWidths.available}%` }}
             title={`Available: ${formatPhp(available)} (${availablePct}%)`}
           />
         </div>
