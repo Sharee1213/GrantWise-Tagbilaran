@@ -4225,3 +4225,428 @@ main:focus {
     animation: none;
   }
 }
+
+
+/* ==========================================================================
+   DEVELOPER SECURITY & PORTAL UI/UX ENHANCEMENTS
+   ========================================================================== */
+
+/* Topbar Portal Header - Clean Single Brand Display */
+.is-portal-topbar .header-inner {
+  width: 100%;
+  max-width: 100%;
+  padding: 0 24px;
+}
+
+@media (min-width: 901px) {
+  .portal-brand-mobile-only {
+    display: none !important;
+  }
+}
+
+/* Spin animation on center axis */
+.spin {
+  display: inline-block;
+  transform-origin: center;
+  animation: spin 0.9s linear infinite;
+}
+
+.button:hover:not(:disabled) svg:not(.spin) {
+  transform: translateX(2px);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Accordion Component */
+.accordion-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.accordion-card {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--card-bg);
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.accordion-card.is-expanded {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.accordion-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--main-text);
+  text-align: left;
+  transition: background-color 160ms ease;
+}
+
+.accordion-trigger:hover {
+  background: var(--hover-bg);
+}
+
+.accordion-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.accordion-title-wrap h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--main-text);
+  letter-spacing: -0.01em;
+}
+
+.accordion-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 9999px;
+  background: var(--badge-info-bg);
+  color: var(--badge-info-text);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.accordion-chevron {
+  color: var(--secondary-text);
+  transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1), color 160ms ease;
+}
+
+.accordion-chevron.is-rotated {
+  transform: rotate(180deg);
+  color: var(--primary-interactive);
+}
+
+.accordion-content {
+  padding: 16px 22px 22px;
+  border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.08);
+  animation: slideDown 200ms ease-out forwards;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Template Cards Grid */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.template-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 180ms ease,
+              box-shadow 180ms ease;
+}
+
+.template-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.template-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.template-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--main-text);
+  margin: 0;
+  line-height: 1.35;
+}
+
+.template-card-subtitle {
+  font-size: 12px;
+  color: var(--secondary-text);
+  margin: 3px 0 0;
+  line-height: 1.3;
+}
+
+.template-card-email-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--hover-bg);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--primary-interactive);
+}
+
+/* Interactive Copy Chip Button */
+.copy-chip-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  color: var(--secondary-text);
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-family: inherit;
+  font-weight: 600;
+  transition: all 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.copy-chip-btn:hover {
+  color: var(--main-text);
+  background: var(--hover-bg);
+  border-color: var(--primary-interactive);
+  transform: translateY(-1px);
+}
+
+.copy-chip-btn:active {
+  transform: translateY(0) scale(0.96);
+}
+
+.copy-chip-btn.is-copied {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.4);
+  animation: pulsePop 300ms ease;
+}
+
+@keyframes pulsePop {
+  0% { transform: scale(0.94); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+.copy-icon-success {
+  color: #34d399;
+  animation: checkPop 250ms ease;
+}
+
+@keyframes checkPop {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Status Chips */
+.chip-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chip-tag.verified {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.chip-tag.candidate {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.chip-tag.readonly {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+/* Staff Previews Grid */
+.preview-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.preview-portal-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 18px;
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 180ms ease,
+              box-shadow 180ms ease;
+}
+
+.preview-portal-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(52, 211, 153, 0.45);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.preview-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.preview-card-icon {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: var(--badge-info-bg);
+  color: var(--primary-interactive);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.preview-card-info {
+  display: grid;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.preview-card-info strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--main-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-card-info p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--secondary-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview-card-scope {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-interactive);
+  margin-top: 4px;
+}
+
+.preview-launch-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--hover-bg);
+  color: var(--main-text);
+  border: 1px solid var(--border-color);
+  text-decoration: none;
+  transition: all 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.preview-launch-btn:hover {
+  background: var(--primary-forest);
+  border-color: var(--primary-interactive);
+  color: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+
+.preview-launch-btn:active {
+  transform: translateY(0) scale(0.98);
+}
+
+/* Audit Log Details Modal */
+.audit-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.audit-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-color);
+}
+
+.audit-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.audit-meta-item span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--secondary-text);
+  text-transform: uppercase;
+}
+
+.audit-meta-item strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--main-text);
+}
+
+.audit-payload-box {
+  background: #060d09;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #34d399;
+  max-height: 380px;
+}
