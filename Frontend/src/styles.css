@@ -1838,6 +1838,20 @@ textarea:focus {
    PUBLIC PAGES STYLING (HERO, PILLARS, CARDS, FOOTER)
    ========================================================================== */
 
+html.js .reveal {
+  opacity: 0;
+  transform: translate3d(0, 16px, 0);
+  transition:
+    opacity 260ms ease-out,
+    transform 260ms ease-out;
+}
+
+html.js .reveal.is-visible {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition-delay: calc(var(--i, 0) * 70ms);
+}
+
 .page-container {
   width: min(1200px, calc(100% - 48px));
   margin: 0 auto;
