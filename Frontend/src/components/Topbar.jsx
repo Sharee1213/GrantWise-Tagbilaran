@@ -65,51 +65,89 @@ export default function Topbar({
   return (
     <header className={`site-header ${isPortalView ? "is-portal-topbar" : ""}`}>
       <div className="header-inner">
-        {/* Left: Mobile hamburger + Brand */}
+        {/* Left: Mobile hamburger + Brand (public) or Breadcrumbs (portal) */}
         <div className="header-left">
           {isPortalView ? (
-            <button
-              type="button"
-              className="mobile-menu-trigger"
-              onClick={onOpenMobileSidebar}
-              aria-label="Open sidebar navigation"
-            >
-              <Menu size={20} aria-hidden="true" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="mobile-menu-trigger"
-              onClick={() => setMobileNavOpen((open) => !open)}
-              aria-label={mobileNavOpen ? "Close main menu" : "Open main menu"}
-              aria-expanded={mobileNavOpen}
-              aria-controls="mobile-main-nav"
-            >
-              {mobileNavOpen ? (
-                <X size={20} aria-hidden="true" />
-              ) : (
+            <>
+              <button
+                type="button"
+                className="mobile-menu-trigger"
+                onClick={onOpenMobileSidebar}
+                aria-label="Open sidebar navigation"
+              >
                 <Menu size={20} aria-hidden="true" />
-              )}
-            </button>
-          )}
+              </button>
 
-          <NavLink
-            className="brand"
-            to="/"
-            aria-label="GrantWise Tagbilaran home"
-          >
-            <span className="brand-mark">
-              <Landmark size={20} strokeWidth={1.8} aria-hidden="true" />
-            </span>
-            <span className="brand-copy">
-              <strong>GrantWise</strong>
-              <span>TAGBILARAN CITY</span>
-            </span>
-          </NavLink>
+              <NavLink
+                className="brand portal-brand-mobile-only"
+                to="/"
+                aria-label="GrantWise Tagbilaran home"
+              >
+                <span className="brand-mark">
+                  <Landmark size={20} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className="brand-copy">
+                  <strong>GrantWise</strong>
+                  <span>TAGBILARAN CITY</span>
+                </span>
+              </NavLink>
+
+              <div className="portal-breadcrumbs">
+                <Link to="/portals" className="breadcrumb-root">
+                  Portals
+                </Link>
+                <span className="breadcrumb-separator">/</span>
+                <span className="breadcrumb-current">
+                  {portalType === "lgu-admin"
+                    ? "LGU Admin Workspace"
+                    : portalType === "barangay-coordinator"
+                      ? "Barangay Coordinator"
+                      : portalType === "school-registrar"
+                        ? "School Registrar"
+                        : portalType === "student"
+                          ? "Student Portal"
+                          : portalType === "system-admin"
+                            ? "Developer Security"
+                            : "Staff Workspace"}
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="mobile-menu-trigger"
+                onClick={() => setMobileNavOpen((open) => !open)}
+                aria-label={mobileNavOpen ? "Close main menu" : "Open main menu"}
+                aria-expanded={mobileNavOpen}
+                aria-controls="mobile-main-nav"
+              >
+                {mobileNavOpen ? (
+                  <X size={20} aria-hidden="true" />
+                ) : (
+                  <Menu size={20} aria-hidden="true" />
+                )}
+              </button>
+
+              <NavLink
+                className="brand"
+                to="/"
+                aria-label="GrantWise Tagbilaran home"
+              >
+                <span className="brand-mark">
+                  <Landmark size={20} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className="brand-copy">
+                  <strong>GrantWise</strong>
+                  <span>TAGBILARAN CITY</span>
+                </span>
+              </NavLink>
+            </>
+          )}
         </div>
 
-        {/* Center: Main public navigation (if not in portal view) or breadcrumb */}
-        {!isPortalView ? (
+        {/* Center: Main public navigation (if not in portal view) */}
+        {!isPortalView && (
           <nav className="main-nav" aria-label="Main navigation">
             {PUBLIC_NAV_LINKS.map(({ to, label, end }) => (
               <NavLink key={to} to={to} end={end}>
@@ -117,26 +155,6 @@ export default function Topbar({
               </NavLink>
             ))}
           </nav>
-        ) : (
-          <div className="portal-breadcrumbs">
-            <Link to="/portals" className="breadcrumb-root">
-              Portals
-            </Link>
-            <span className="breadcrumb-separator">/</span>
-            <span className="breadcrumb-current">
-              {portalType === "lgu-admin"
-                ? "LGU Admin Workspace"
-                : portalType === "barangay-coordinator"
-                  ? "Barangay Coordinator"
-                  : portalType === "school-registrar"
-                    ? "School Registrar"
-                    : portalType === "student"
-                      ? "Student Portal"
-                      : portalType === "system-admin"
-                        ? "Developer Security"
-                        : "Staff Workspace"}
-            </span>
-          </div>
         )}
 
         {/* Right: Theme toggle & User Controls */}
