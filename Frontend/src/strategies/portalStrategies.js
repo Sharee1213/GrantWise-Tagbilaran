@@ -76,24 +76,65 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
   }
 
   async loadDashboardData(requestPortalData, apiRequest) {
-    const [dashboard, programs, applications, fundingCycles, queue, lookups, disbursements] =
-      await Promise.all([
-        requestPortalData("admin/dashboard"),
-        requestPortalData("admin/programs"),
-        requestPortalData("admin/applications"),
-        requestPortalData("admin/funding-cycles"),
-        requestPortalData("admin/verifications"),
-        apiRequest("lookups"),
-        requestPortalData("admin/disbursements").catch(() => null),
-      ]);
-    const activeDisbursements =
-      disbursements?.grants && disbursements.grants.length > 0
-        ? disbursements
-        : dashboard?.disbursements || {
-            grants: [],
-            barangay_breakdown: [],
-            audit_logs: [],
-          };
+    const [
+      dashboardResult,
+      programsResult,
+      applicationsResult,
+      fundingCyclesResult,
+      queueResult,
+      lookupsResult,
+      disbursementsResult,
+    ] = await Promise.allSettled([
+      requestPortalData("admin/dashboard"),
+      requestPortalData("admin/programs"),
+      requestPortalData("admin/applications"),
+      requestPortalData("admin/funding-cycles"),
+      requestPortalData("admin/verifications"),
+      apiRequest("lookups"),
+      requestPortalData("admin/disbursements"),
+    ]);
+
+    const dashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : {};
+    const programs = programsResult.status === "fulfilled" ? programsResult.value : {};
+    const applications = applicationsResult.status === "fulfilled" ? applicationsResult.value : {};
+    const fundingCycles = fundingCyclesResult.status === "fulfilled" ? fundingCyclesResult.value : {};
+    const queue = queueResult.status === "fulfilled" ? queueResult.value : {};
+    const lookups = lookupsResult.status === "fulfilled" ? lookupsResult.value : {};
+    const loadErrors = [];
+
+    let activeDisbursements = dashboard?.disbursements || {
+      grants: [],
+      barangay_breakdown: [],
+      audit_logs: [],
+    };
+    let disbursementSummaryOnly = false;
+
+    if (disbursementsResult.status === "fulfilled") {
+      const disbursements = disbursementsResult.value;
+      activeDisbursements =
+        disbursements?.grants && disbursements.grants.length > 0
+          ? disbursements
+          : dashboard?.disbursements || {
+              grants: [],
+              barangay_breakdown: [],
+              audit_logs: [],
+            };
+      disbursementSummaryOnly = false;
+    } else {
+      loadErrors.push({
+        key: "admin/disbursements",
+        message:
+          disbursementsResult.reason?.message ||
+          "Unable to load the latest barangay cash disbursement details.",
+      });
+      activeDisbursements = dashboard?.disbursements || {
+        grants: [],
+        barangay_breakdown: [],
+        audit_logs: [],
+      };
+      disbursementSummaryOnly = Boolean(dashboard?.disbursements);
+    }
+
     return {
       ...dashboard,
       ...programs,
@@ -102,6 +143,8 @@ export class LguAdminPortalStrategy extends RolePortalStrategy {
       ...queue,
       ...lookups,
       disbursements: activeDisbursements,
+      disbursementSummaryOnly,
+      loadErrors,
     };
   }
 }
@@ -140,13 +183,44 @@ export class BarangayCoordinatorPortalStrategy extends RolePortalStrategy {
   }
 
   async loadDashboardData(requestPortalData, apiRequest) {
-    const [dashboard, queue, grantsData, notifsData] = await Promise.all([
+    const [dashboardResult, queueResult, grantsResult, notifsResult] = await Promise.allSettled([
       requestPortalData("coordinator/dashboard"),
       requestPortalData("coordinator/verifications"),
-      requestPortalData("coordinator/grants").catch(() => ({ grants: [] })),
-      requestPortalData("coordinator/notifications").catch(() => ({ notifications: [] })),
+      requestPortalData("coordinator/grants"),
+      requestPortalData("coordinator/notifications"),
     ]);
-    return { ...dashboard, ...queue, ...grantsData, ...notifsData };
+
+    const dashboard = dashboardResult.status === "fulfilled" ? dashboardResult.value : {};
+    const queue = queueResult.status === "fulfilled" ? queueResult.value : {};
+    const loadErrors = [];
+
+    const grantsData =
+      grantsResult.status === "fulfilled"
+        ? grantsResult.value
+        : (() => {
+            loadErrors.push({
+              key: "coordinator/grants",
+              message:
+                grantsResult.reason?.message ||
+                "Unable to load the approved grant records for this barangay.",
+            });
+            return { grants: [] };
+          })();
+
+    const notifsData =
+      notifsResult.status === "fulfilled"
+        ? notifsResult.value
+        : (() => {
+            loadErrors.push({
+              key: "coordinator/notifications",
+              message:
+                notifsResult.reason?.message ||
+                "Unable to load your latest notifications.",
+            });
+            return { notifications: [] };
+          })();
+
+    return { ...dashboard, ...queue, ...grantsData, ...notifsData, loadErrors };
   }
 }
 
