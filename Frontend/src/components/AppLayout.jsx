@@ -7,16 +7,20 @@ import { apiRequest } from "../services/api.js";
 
 // Keeps the header/sidebar on screen while a lazily loaded page downloads.
 function PageOutlet() {
+  const location = useLocation();
+
   return (
-    <Suspense
-      fallback={
-        <div className="page-container" role="status" aria-live="polite">
-          <LoadingSkeleton type="card" lines={4} />
-        </div>
-      }
-    >
-      <Outlet />
-    </Suspense>
+    <div key={location.pathname} className="page-enter">
+      <Suspense
+        fallback={
+          <div className="page-container" role="status" aria-live="polite">
+            <LoadingSkeleton type="card" lines={4} />
+          </div>
+        }
+      >
+        <Outlet />
+      </Suspense>
+    </div>
   );
 }
 
