@@ -42,8 +42,15 @@ export function getPasswordStrength(password) {
     return { label: "Needs non-space characters", value: 0, passed: 0, total };
   }
 
-  if (passed <= 2) return { label: "Weak", value: Math.max(25, value), passed, total };
-  if (passed <= 4) return { label: "Fair", value: Math.max(50, value), passed, total };
-  if (passed === 5) return { label: "Strong", value: 100, passed, total };
-  return { label: "Good", value: Math.max(75, value), passed, total };
+  // Length and rule-based evaluation (NIST 800-63B passphrase friendly)
+  if (password.length >= 24 || passed === 5) {
+    return { label: "Strong", value: 100, passed, total };
+  }
+  if (password.length >= 16 || passed === 4) {
+    return { label: "Good", value: Math.max(75, value), passed, total };
+  }
+  if (password.length >= 12 || passed === 3) {
+    return { label: "Fair", value: Math.max(50, value), passed, total };
+  }
+  return { label: "Weak", value: Math.max(25, value), passed, total };
 }
