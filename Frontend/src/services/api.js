@@ -51,7 +51,16 @@ async function requestJson(url, options = {}) {
     try {
       payload = JSON.parse(responseText);
     } catch {
-      payload = { message: responseText };
+      if (/^\s*</.test(responseText)) {
+        payload = {
+          message:
+            response.status === 404
+              ? "The requested endpoint was not found on the server. Please ensure the backend is running with the latest updates."
+              : `Server returned an error (${response.status}). Please try again later.`,
+        };
+      } else {
+        payload = { message: responseText };
+      }
     }
   }
 
