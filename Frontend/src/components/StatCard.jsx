@@ -3,8 +3,10 @@ import useCountUp from "../hooks/useCountUp.js";
 
 export default function StatCard({
   title,
+  label,
   value,
   subtext,
+  meta,
   icon: Icon,
   variant = "default", // 'default' | 'success' | 'warning' | 'info' | 'danger'
   badge,
@@ -14,6 +16,8 @@ export default function StatCard({
   format,
 }) {
   const isClickable = typeof onClick === "function";
+  const displayTitle = title || label;
+  const displaySubtext = subtext || meta;
   const shouldAnimate =
     numericValue !== undefined &&
     numericValue !== null &&
@@ -47,7 +51,7 @@ export default function StatCard({
       }
     >
       <div className="stat-card-header">
-        <span className="stat-card-title">{title}</span>
+        <span className="stat-card-title">{displayTitle}</span>
         {Icon && (
           <span className={`stat-card-icon-wrapper stat-card-icon-wrapper-${variant}`} aria-hidden="true">
             <Icon size={18} />
@@ -60,7 +64,7 @@ export default function StatCard({
         {badge && <span className="stat-card-badge">{badge}</span>}
       </div>
 
-      {subtext && <p className="stat-card-subtext">{subtext}</p>}
+      {displaySubtext && <p className="stat-card-subtext">{displaySubtext}</p>}
     </article>
   );
 }
