@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import ChangePasswordDialog from "./ChangePasswordDialog.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 import ThemeToggle from "./ThemeToggle.jsx";
 import { getPortalPathForRole } from "../services/portalPaths.js";
 
@@ -32,6 +33,19 @@ export default function Topbar({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const location = useLocation();
+
+  const notificationConfig =
+    user?.role === "Scholar"
+      ? {
+          listPath: "student/notifications",
+          readPath: (id) => `student/notifications/${id}/read`,
+        }
+      : user?.role === "Barangay Coordinator"
+        ? {
+            listPath: "coordinator/notifications",
+            readPath: (id) => `coordinator/notifications/${id}/read`,
+          }
+        : null;
 
   // Close the public mobile menu whenever the route changes.
   useEffect(() => {
@@ -141,6 +155,13 @@ export default function Topbar({
                   <span>{user.firstName}</span>
                   <small>{user.role}</small>
                 </NavLink>
+              )}
+
+              {notificationConfig && (
+                <NotificationBell
+                  listPath={notificationConfig.listPath}
+                  readPath={notificationConfig.readPath}
+                />
               )}
 
               <button
