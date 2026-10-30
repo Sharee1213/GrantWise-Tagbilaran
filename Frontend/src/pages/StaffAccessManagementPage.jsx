@@ -308,6 +308,21 @@ export default function StaffAccessManagementPage() {
     setBusy(true);
     setError(null);
     setSuccess("");
+    if (
+      domainForm.domainStatus === "verified" &&
+      ["ub.edu.ph", "tcc.edu.ph", "pmi-bohol.edu.ph"].includes(
+        domainForm.domain.trim().toLowerCase(),
+      )
+    ) {
+      setError({
+        status: 400,
+        title: "Invalid domain verification status.",
+        message:
+          "Candidate domains (ub.edu.ph, tcc.edu.ph, pmi-bohol.edu.ph) cannot be verified as student registration domains.",
+      });
+      setBusy(false);
+      return;
+    }
     try {
       const payload = {
         domain: domainForm.domain.trim().toLowerCase() || null,
@@ -347,6 +362,23 @@ export default function StaffAccessManagementPage() {
     setBusy(true);
     setError(null);
     setSuccess("");
+    const targetDomain = schoolDomains.find((d) => d.domain_id === domainId);
+    if (
+      nextStatus === "verified" &&
+      targetDomain &&
+      ["ub.edu.ph", "tcc.edu.ph", "pmi-bohol.edu.ph"].includes(
+        targetDomain.domain?.toLowerCase(),
+      )
+    ) {
+      setError({
+        status: 400,
+        title: "Invalid domain verification status.",
+        message:
+          "Candidate domains (ub.edu.ph, tcc.edu.ph, pmi-bohol.edu.ph) cannot be verified as student registration domains.",
+      });
+      setBusy(false);
+      return;
+    }
     try {
       await apiRequest(`system-admin/school-domains/${domainId}`, {
         method: "PATCH",
@@ -1358,7 +1390,8 @@ export default function StaffAccessManagementPage() {
                         className="button button-secondary"
                         style={{ padding: "5px 10px", fontSize: "11px" }}
                         onClick={() => handleUpdateDomainStatus(sd.domain_id, "verified")}
-                        disabled={busy}
+                        disabled={busy || ["ub.edu.ph", "tcc.edu.ph", "pmi-bohol.edu.ph"].includes(sd.domain?.toLowerCase())}
+                        title={["ub.edu.ph", "tcc.edu.ph", "pmi-bohol.edu.ph"].includes(sd.domain?.toLowerCase()) ? "Candidate domains cannot be verified" : undefined}
                       >
                         Mark verified
                       </button>

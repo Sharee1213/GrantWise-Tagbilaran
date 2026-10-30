@@ -14,76 +14,18 @@ import PageHeading from "../components/PageHeading.jsx";
 import PasswordGuidance from "../components/PasswordGuidance.jsx";
 import { apiRequest } from "../services/api.js";
 import { getNewPasswordError } from "../services/passwordPolicy.js";
+import {
+  isAllowedStudentEmail,
+  BLOCKED_CANDIDATE_DOMAINS,
+  APPROVED_SCHOOL_DOMAINS,
+  CANDIDATE_DOMAIN_ERROR,
+} from "../services/studentEmailPolicy.js";
+
+export { isAllowedStudentEmail };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PHONE_PATTERN = /^[0-9+()\-\s]{7,30}$/;
 const NAME_PATTERN = /^[\p{L}\p{M}\s.'-]+$/u;
-
-const DISALLOWED_STUDENT_CONSUMER_DOMAINS = new Set([
-  "googlemail.com",
-  "yahoo.com",
-  "yahoo.com.ph",
-  "ymail.com",
-  "rocketmail.com",
-  "outlook.com",
-  "hotmail.com",
-  "live.com",
-  "msn.com",
-  "icloud.com",
-  "me.com",
-  "mac.com",
-  "aol.com",
-  "proton.me",
-  "protonmail.com",
-  "zoho.com",
-  "mail.com",
-  "gmx.com",
-]);
-
-const APPROVED_SCHOOL_DOMAINS = new Set([
-  "hnu.edu.ph",
-  "holyname.edu.ph",
-  "holynameuniversity.edu.ph",
-  "bisu.edu.ph",
-  "boholislandstateuniv.edu.ph",
-  "boholislandstateuniversity.edu.ph",
-  "universityofbohol.edu.ph",
-  "universityofbohol.ph",
-  "ub.edu.ph",
-  "tagbilarancitycollege.edu.ph",
-  "tcc.edu.ph",
-  "pmi-coleges.edu.ph",
-  "pmi-colleges.edu.ph",
-  "pmicollegesbohol.edu.ph",
-  "pmi-bohol.edu.ph",
-  "pmicolleges.edu.ph",
-  "pmi.edu.ph",
-]);
-
-export function isAllowedStudentEmail(email) {
-  const normalized = String(email || "").trim().toLowerCase();
-  if (!EMAIL_PATTERN.test(normalized) || /[<>",;\\]/.test(normalized)) {
-    return false;
-  }
-  const parts = normalized.split("@");
-  if (parts.length !== 2) return false;
-  const [, domain] = parts;
-  if (domain === "gmail.com") return true;
-  if (
-    DISALLOWED_STUDENT_CONSUMER_DOMAINS.has(domain) ||
-    domain.endsWith(".gov.ph") ||
-    domain.endsWith(".gov")
-  ) {
-    return false;
-  }
-  if (APPROVED_SCHOOL_DOMAINS.has(domain)) {
-    return true;
-  }
-  return (
-    (domain.endsWith(".edu.ph") && domain.length > ".edu.ph".length) ||
-    (domain.endsWith(".edu") && domain.length > ".edu".length)
-  );
-}
 
 const YEAR_LEVEL_OPTIONS = [
   "1st Year",
@@ -118,15 +60,19 @@ function validateRegistrationForm(form) {
     errors.lastName = "Enter a valid last name.";
   }
 
+  const emailDomain = email.includes("@") ? email.split("@")[1].toLowerCase() : "";
+
   if (!email) {
     errors.email = "Email address is required.";
   } else if (email.length > 255) {
     errors.email = "Email address must be 255 characters or fewer.";
   } else if (/\s/.test(email) || !EMAIL_PATTERN.test(email)) {
     errors.email = "Enter a valid email address (for example, name@gmail.com or name@school.edu.ph).";
+  } else if (BLOCKED_CANDIDATE_DOMAINS.has(emailDomain)) {
+    errors.email = CANDIDATE_DOMAIN_ERROR;
   } else if (!isAllowedStudentEmail(email)) {
     errors.email =
-      "Students must register using a personal Gmail (@gmail.com) or an official school email (@hnu.edu.ph, @universityofbohol.edu.ph, @universityofbohol.ph, @bisu.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph, @pmi-coleges.edu.ph).";
+      "Students must register using a personal Gmail (@gmail.com) or an official school email (@hnu.edu.ph, @bisu.edu.ph, @universityofbohol.edu.ph, @tagbilarancitycollege.edu.ph, @pmicollegesbohol.edu.ph).";
   }
 
   const passwordError = getNewPasswordError(form.password);
@@ -436,7 +382,7 @@ export default function SignUpPage() {
                   />
                 </div>
                 <p id="signup-email-hint" className="field-hint">
-                  Accepted: personal Gmail (<code>@gmail.com</code>) or official school email (<code>@hnu.edu.ph</code>, <code>@universityofbohol.edu.ph</code>, <code>@bisu.edu.ph</code>, <code>@tagbilarancitycollege.edu.ph</code>, <code>@pmicollegesbohol.edu.ph</code>, <code>@pmi-coleges.edu.ph</code>).
+                  Accepted: personal Gmail (<code>@gmail.com</code>) or official school email (<code>@hnu.edu.ph</code>, <code>@bisu.edu.ph</code>, <code>@universityofbohol.edu.ph</code>, <code>@tagbilarancitycollege.edu.ph</code>, <code>@pmicollegesbohol.edu.ph</code>).
                 </p>
                 {getFieldError("email") && (
                   <p role="alert" className="field-error">

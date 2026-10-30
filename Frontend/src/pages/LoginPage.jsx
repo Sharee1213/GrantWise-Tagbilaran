@@ -14,6 +14,10 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import PageHeading from "../components/PageHeading.jsx";
 import { apiRequest } from "../services/api.js";
 import { getPortalPathForRole } from "../services/portalPaths.js";
+import {
+  BLOCKED_CANDIDATE_DOMAINS,
+  CANDIDATE_DOMAIN_ERROR,
+} from "../services/studentEmailPolicy.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -22,6 +26,7 @@ export { getPortalPathForRole };
 function validateLoginFields({ email, password }) {
   const errors = {};
   const trimmedEmail = email.trim();
+  const emailDomain = trimmedEmail.includes("@") ? trimmedEmail.split("@")[1].toLowerCase() : "";
 
   if (!trimmedEmail) {
     errors.email = "Email address is required.";
@@ -29,6 +34,8 @@ function validateLoginFields({ email, password }) {
     errors.email = "Email address must be 255 characters or fewer.";
   } else if (/\s/.test(trimmedEmail) || !EMAIL_PATTERN.test(trimmedEmail)) {
     errors.email = "Enter a valid email address (for example, name@gmail.com or name@school.edu.ph).";
+  } else if (BLOCKED_CANDIDATE_DOMAINS.has(emailDomain)) {
+    errors.email = CANDIDATE_DOMAIN_ERROR;
   }
 
   if (!password) {
