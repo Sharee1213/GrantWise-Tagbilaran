@@ -1,15 +1,8 @@
 import React from "react";
 import { CheckCircle2, DollarSign, PieChart, ShieldAlert } from "lucide-react";
+import { formatPhp } from "../services/format.js";
 
-export function formatPhp(value) {
-  if (value == null || value === "") return "—";
-  return new Intl.NumberFormat("en-PH", {
-    style: "currency",
-    currency: "PHP",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number(value) || 0);
-}
+export { formatPhp } from "../services/format.js";
 
 export default function FundingSummary({
   totalBudget = 0,
